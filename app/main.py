@@ -1,111 +1,96 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-from typing import List
+from fastapi import FastAPI, Depends
+from sqlalchemy.orm import Session
+from app.database import Base, engine, get_db
+from app.models import Company, FinancialDocument
+from app.schemas import CompanyCreate, FinancialDocumentCreate
 
-app = FastAPI(title='SEO - Sistema de Eficiência Operacional')
+Base.metadata.create_all(bind=engine)
 
-companies = []
-documents = []
+app = FastAPI(title='SEO AI Backoffice', version='1.0.0')
+
 audit_logs = []
-
-class Company(BaseModel):
-    name: str
-    tax_id: str
-    country: str = 'Portugal'
-
-class FinancialDocument(BaseModel):
-    company_id: int
-    document_type: str
-    supplier: str
-    amount: float
-    vat_amount: float
-    currency: str = 'EUR'
-    issue_date: str
-    description: str
 
 @app.get('/')
 def root():
-    return {
-        'message': 'SEO AI Backoffice API running',
-        'status': 'online'
-    }
+    return {'status': 'online', 'system': 'SEO AI Backoffice'}
 
 @app.get('/health')
 def health():
     return {'status': 'healthy'}
 
 @app.post('/companies')
-def create_company(company: Company):
-    company_data = company.dict()
-    company_data['id'] = len(companies) + 1
-    companies.append(company_data)
+def create_company(company: CompanyCreate, db: Session = Depends(get_db)):
+    db_company = Company(
+        name=company.name,
+        tax_id=company.tax_id,
+        country=company.country
+    )
 
-    audit_logs.append({
-        'action': 'company_created',
-        'company': company.name
-    })
+    db.add(db_company)
+    db.commit()
+    db.refresh(db_company)
 
-    return company_data
+    audit_logs.append({'action': 'company_created'})
+
+    return db_company
 
 @app.get('/companies')
-def list_companies():
-    return companies
+def list_companies(db: Session = Depends(get_db)):
+    return db.query(Company).all()
 
 @app.post('/documents')
-def create_document(document: FinancialDocument):
-    document_data = document.dict()
-    document_data['id'] = len(documents) + 1
-    document_data['status'] = 'uploaded'
+def create_document(document: FinancialDocumentCreate, db: Session = Depends(get_db)):
+    db_document = FinancialDocument(
+        company_id=document.company_id,
+        document_type=document.document_type,
+        supplier=document.supplier,
+        amount=document.amount,
+        vat_amount=document.vat_amount,
+        currency=document.currency,
+        issue_date=document.issue_date,
+        description=document.description
+    )
 
-    documents.append(document_data)
+    db.add(db_document)
+    db.commit()
+    db.refresh(db_document)
 
-    audit_logs.append({
-        'action': 'document_uploaded',
-        'supplier': document.supplier,
-        'amount': document.amount
-    })
-
-    return document_data
+    return db_document
 
 @app.get('/documents')
-def list_documents():
-    return documents
+def list_documents(db: Session = Depends(get_db)):
+    return db.query(FinancialDocument).all()
 
 @app.post('/documents/{document_id}/process')
-def process_document(document_id: int):
-    for document in documents:
-        if document['id'] == document_id:
-            document['status'] = 'processed'
-            document['category'] = 'Operational Expense'
-            document['ai_confidence'] = 0.94
+def process_document(document_id: int, db: Session = Depends(get_db)):
+    document = db.query(FinancialDocument).filter(FinancialDocument.id == document_id).first()
 
-            audit_logs.append({
-                'action': 'document_processed',
-                'document_id': document_id
-            })
+    if not document:
+        return {'error': 'Document not found'}
 
-            return {
-                'message': 'Document processed successfully',
-                'document': document
-            }
+    document.status = 'processed'
+    document.category = 'Operational Expense'
 
-    return {'error': 'Document not found'}
+    db.commit()
+
+    return {
+        'message': 'processed',
+        'document_id': document.id,
+        'category': document.category,
+        'ai_confidence': 0.94
+    }
 
 @app.get('/dashboard/{company_id}')
-def dashboard(company_id: int):
-    company_documents = [d for d in documents if d['company_id'] == company_id]
+def dashboard(company_id: int, db: Session = Depends(get_db)):
+    docs = db.query(FinancialDocument).filter(FinancialDocument.company_id == company_id).all()
 
-    total_expenses = sum(d['amount'] for d in company_documents)
-    total_vat = sum(d['vat_amount'] for d in company_documents)
+    total_expenses = sum(doc.amount for doc in docs)
 
     return {
         'company_id': company_id,
-        'documents': len(company_documents),
+        'documents': len(docs),
         'total_expenses': total_expenses,
-        'total_vat': total_vat,
-        'alerts': [
-            'Operational expenses increased 12% this month.'
-        ]
+        'efficiency_score': 87
     }
 
 @app.get('/audit-logs')
