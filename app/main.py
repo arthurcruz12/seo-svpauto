@@ -3,16 +3,21 @@ from sqlalchemy.orm import Session
 from app.database import Base, engine, get_db
 from app.models import Company, FinancialDocument
 from app.schemas import CompanyCreate, FinancialDocumentCreate
+from app.neuro_ai import neuro_ai_engine
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title='SEO AI Backoffice', version='1.0.0')
+app = FastAPI(title='SEO NeuroAI Backoffice', version='2.0.0')
 
 audit_logs = []
 
 @app.get('/')
 def root():
-    return {'status': 'online', 'system': 'SEO AI Backoffice'}
+    return {
+        'status': 'online',
+        'system': 'SEO NeuroAI Backoffice',
+        'neuro_ai': 'enabled'
+    }
 
 @app.get('/health')
 def health():
@@ -40,6 +45,11 @@ def list_companies(db: Session = Depends(get_db)):
 
 @app.post('/documents')
 def create_document(document: FinancialDocumentCreate, db: Session = Depends(get_db)):
+    neuro_result = neuro_ai_engine.classify_document(
+        document.description,
+        document.amount
+    )
+
     db_document = FinancialDocument(
         company_id=document.company_id,
         document_type=document.document_type,
@@ -48,14 +58,23 @@ def create_document(document: FinancialDocumentCreate, db: Session = Depends(get
         vat_amount=document.vat_amount,
         currency=document.currency,
         issue_date=document.issue_date,
-        description=document.description
+        description=document.description,
+        category=neuro_result['category']
     )
 
     db.add(db_document)
     db.commit()
     db.refresh(db_document)
 
-    return db_document
+    audit_logs.append({
+        'action': 'document_classified',
+        'category': neuro_result['category']
+    })
+
+    return {
+        'document': db_document,
+        'neuro_ai': neuro_result
+    }
 
 @app.get('/documents')
 def list_documents(db: Session = Depends(get_db)):
@@ -69,7 +88,6 @@ def process_document(document_id: int, db: Session = Depends(get_db)):
         return {'error': 'Document not found'}
 
     document.status = 'processed'
-    document.category = 'Operational Expense'
 
     db.commit()
 
@@ -82,16 +100,46 @@ def process_document(document_id: int, db: Session = Depends(get_db)):
 
 @app.get('/dashboard/{company_id}')
 def dashboard(company_id: int, db: Session = Depends(get_db)):
-    docs = db.query(FinancialDocument).filter(FinancialDocument.company_id == company_id).all()
+    docs = db.query(FinancialDocument).filter(
+        FinancialDocument.company_id == company_id
+    ).all()
 
     total_expenses = sum(doc.amount for doc in docs)
+
+    neuro_state = neuro_ai_engine.analyze_financial_state([
+        {
+            'amount': doc.amount,
+            'category': doc.category
+        }
+        for doc in docs
+    ])
 
     return {
         'company_id': company_id,
         'documents': len(docs),
         'total_expenses': total_expenses,
-        'efficiency_score': 87
+        'efficiency_score': 87,
+        'neuro_analysis': neuro_state
     }
+
+@app.get('/companies/{company_id}/neuro-insights')
+def neuro_insights(company_id: int, db: Session = Depends(get_db)):
+    docs = db.query(FinancialDocument).filter(
+        FinancialDocument.company_id == company_id
+    ).all()
+
+    insight = neuro_ai_engine.generate_executive_insight(
+        company_id,
+        [
+            {
+                'amount': doc.amount,
+                'category': doc.category
+            }
+            for doc in docs
+        ]
+    )
+
+    return insight
 
 @app.get('/audit-logs')
 def get_logs():
