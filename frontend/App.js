@@ -1,130 +1,121 @@
 import React, { useEffect, useState } from 'react';
-import {
-  SafeAreaView,
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  TextInput
-} from 'react-native';
+import { SafeAreaView, View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
 
 const API_URL = 'http://127.0.0.1:8000';
 
 export default function App() {
   const [dashboard, setDashboard] = useState(null);
   const [documents, setDocuments] = useState([]);
+  const [insights, setInsights] = useState(null);
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
 
-  async function loadDashboard() {
-    try {
-      const response = await fetch(`${API_URL}/dashboard/1`);
-      const data = await response.json();
-      setDashboard(data);
-    } catch (error) {
-      console.log(error);
-    }
-  }
+  async function loadData() {
+    const dashboardResponse = await fetch(`${API_URL}/dashboard/1`);
+    const dashboardData = await dashboardResponse.json();
+    setDashboard(dashboardData);
 
-  async function loadDocuments() {
-    try {
-      const response = await fetch(`${API_URL}/documents`);
-      const data = await response.json();
-      setDocuments(data);
-    } catch (error) {
-      console.log(error);
-    }
+    const documentsResponse = await fetch(`${API_URL}/documents`);
+    const documentsData = await documentsResponse.json();
+    setDocuments(documentsData);
+
+    const insightsResponse = await fetch(`${API_URL}/companies/1/neuro-insights`);
+    const insightsData = await insightsResponse.json();
+    setInsights(insightsData);
   }
 
   async function createDocument() {
-    try {
-      await fetch(`${API_URL}/documents`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          company_id: 1,
-          document_type: 'invoice',
-          supplier: 'Fornecedor NeuroAI',
-          amount: Number(amount),
-          vat_amount: Number(amount) * 0.23,
-          currency: 'EUR',
-          issue_date: '2026-05-27',
-          description: description
-        })
-      });
+    await fetch(`${API_URL}/documents`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        company_id: 1,
+        document_type: 'invoice',
+        supplier: 'NeuroAI Supplier',
+        amount: Number(amount),
+        vat_amount: Number(amount) * 0.23,
+        currency: 'EUR',
+        issue_date: '2026-05-28',
+        description
+      })
+    });
 
-      setDescription('');
-      setAmount('');
+    setDescription('');
+    setAmount('');
 
-      loadDocuments();
-      loadDashboard();
-    } catch (error) {
-      console.log(error);
-    }
+    loadData();
   }
 
   useEffect(() => {
-    loadDashboard();
-    loadDocuments();
+    loadData();
   }, []);
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView>
-        <Text style={styles.title}>SEO NeuroAI</Text>
-        <Text style={styles.subtitle}>AI Backoffice</Text>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        <Text style={styles.logo}>SEO NeuroAI</Text>
+        <Text style={styles.subtitle}>Operational Intelligence Infrastructure</Text>
+
+        <View style={styles.heroCard}>
+          <Text style={styles.heroTitle}>Executive Dashboard</Text>
+
+          <View style={styles.metricRow}>
+            <View style={styles.metricBox}>
+              <Text style={styles.metricValue}>€{dashboard?.total_expenses || 0}</Text>
+              <Text style={styles.metricLabel}>Expenses</Text>
+            </View>
+
+            <View style={styles.metricBox}>
+              <Text style={styles.metricValue}>{dashboard?.efficiency_score || 0}</Text>
+              <Text style={styles.metricLabel}>Efficiency</Text>
+            </View>
+          </View>
+        </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Dashboard Executivo</Text>
+          <Text style={styles.sectionTitle}>NeuroAI Insights</Text>
 
-          <Text style={styles.metric}>
-            Despesas Totais: €{dashboard?.total_expenses || 0}
-          </Text>
-
-          <Text style={styles.metric}>
-            Eficiência Operacional: {dashboard?.efficiency_score || 0}
-          </Text>
-
-          <Text style={styles.metric}>
-            Documentos: {dashboard?.documents || 0}
+          <Text style={styles.insightText}>
+            {insights?.neuro_ai_summary || 'Loading cognitive insights...'}
           </Text>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Adicionar Documento</Text>
+          <Text style={styles.sectionTitle}>Process Financial Document</Text>
 
           <TextInput
             style={styles.input}
-            placeholder='Descrição'
+            placeholder='Document description'
+            placeholderTextColor='#94A3B8'
             value={description}
             onChangeText={setDescription}
           />
 
           <TextInput
             style={styles.input}
-            placeholder='Valor'
+            placeholder='Amount'
+            placeholderTextColor='#94A3B8'
             keyboardType='numeric'
             value={amount}
             onChangeText={setAmount}
           />
 
           <TouchableOpacity style={styles.button} onPress={createDocument}>
-            <Text style={styles.buttonText}>Processar com NeuroAI</Text>
+            <Text style={styles.buttonText}>Run NeuroAI</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Documentos</Text>
+          <Text style={styles.sectionTitle}>Documents</Text>
 
           {documents.map((doc) => (
-            <View key={doc.id} style={styles.documentItem}>
-              <Text style={styles.documentTitle}>{doc.supplier}</Text>
-              <Text>{doc.description}</Text>
-              <Text>€{doc.amount}</Text>
-              <Text>{doc.category}</Text>
+            <View key={doc.id} style={styles.documentCard}>
+              <Text style={styles.documentSupplier}>{doc.supplier}</Text>
+              <Text style={styles.documentText}>{doc.description}</Text>
+              <Text style={styles.documentAmount}>€{doc.amount}</Text>
+              <Text style={styles.documentCategory}>{doc.category}</Text>
             </View>
           ))}
         </View>
@@ -136,63 +127,111 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: '#020617',
     padding: 20
   },
-  title: {
+  logo: {
     color: '#FFFFFF',
-    fontSize: 34,
+    fontSize: 38,
     fontWeight: 'bold',
     marginTop: 20
   },
   subtitle: {
     color: '#94A3B8',
-    fontSize: 18,
-    marginBottom: 20
+    marginBottom: 24,
+    fontSize: 16
+  },
+  heroCard: {
+    backgroundColor: '#0F172A',
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#1E293B'
+  },
+  heroTitle: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 18
+  },
+  metricRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  metricBox: {
+    backgroundColor: '#111827',
+    borderRadius: 20,
+    padding: 18,
+    width: '48%'
+  },
+  metricValue: {
+    color: '#10B981',
+    fontSize: 28,
+    fontWeight: 'bold'
+  },
+  metricLabel: {
+    color: '#CBD5E1',
+    marginTop: 6
   },
   card: {
-    backgroundColor: '#1E293B',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 20
+    backgroundColor: '#0F172A',
+    borderRadius: 24,
+    padding: 22,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#1E293B'
   },
-  cardTitle: {
+  sectionTitle: {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
-    marginBottom: 15
+    marginBottom: 16
   },
-  metric: {
-    color: '#E2E8F0',
-    fontSize: 16,
-    marginBottom: 10
+  insightText: {
+    color: '#CBD5E1',
+    lineHeight: 22
   },
   input: {
-    backgroundColor: '#334155',
-    borderRadius: 12,
-    padding: 14,
+    backgroundColor: '#111827',
+    borderRadius: 16,
+    padding: 16,
     color: '#FFFFFF',
-    marginBottom: 12
+    marginBottom: 14
   },
   button: {
     backgroundColor: '#10B981',
-    borderRadius: 14,
-    padding: 16,
+    borderRadius: 18,
+    padding: 18,
     alignItems: 'center'
   },
   buttonText: {
     color: '#FFFFFF',
-    fontWeight: 'bold'
+    fontWeight: 'bold',
+    fontSize: 16
   },
-  documentItem: {
-    backgroundColor: '#334155',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10
+  documentCard: {
+    backgroundColor: '#111827',
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 14
   },
-  documentTitle: {
+  documentSupplier: {
     color: '#FFFFFF',
     fontWeight: 'bold',
-    marginBottom: 4
+    fontSize: 16,
+    marginBottom: 6
+  },
+  documentText: {
+    color: '#CBD5E1'
+  },
+  documentAmount: {
+    color: '#10B981',
+    marginTop: 10,
+    fontWeight: 'bold'
+  },
+  documentCategory: {
+    color: '#60A5FA',
+    marginTop: 6
   }
 });
