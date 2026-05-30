@@ -10,6 +10,16 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class TokenPair(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
@@ -23,6 +33,7 @@ class UserLogin(BaseModel):
 
 class UserRead(BaseModel):
     id: int
+    tenant_id: int
     email: EmailStr
     role: str
 
@@ -38,6 +49,7 @@ class CompanyCreate(BaseModel):
 
 class CompanyRead(CompanyCreate):
     id: int
+    tenant_id: int
 
     class Config:
         from_attributes = True
@@ -56,6 +68,7 @@ class FinancialDocumentCreate(BaseModel):
 
 class FinancialDocumentRead(FinancialDocumentCreate):
     id: int
+    tenant_id: int
     status: str
     category: Optional[str] = None
     confidence_score: Optional[Decimal] = None
@@ -66,6 +79,7 @@ class FinancialDocumentRead(FinancialDocumentCreate):
 
 class AuditLogRead(BaseModel):
     id: int
+    tenant_id: Optional[int] = None
     action: str
     entity_type: str
     entity_id: Optional[int] = None
