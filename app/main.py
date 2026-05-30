@@ -1,26 +1,46 @@
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.database import Base, engine, get_db
-from app.models import Company, FinancialDocument
+from app.database import get_db
+from app.models import AuditLog, Company, FinancialDocument, User
 from app.neuro_ai import neuro_ai_engine
-from app.schemas import CompanyCreate, FinancialDocumentCreate
+from app.schemas import CompanyCreate, FinancialDocumentCreate, Token, UserCreate, UserLogin
+from app.security import create_access_token, decode_access_token, get_password_hash, verify_password
 
-Base.metadata.create_all(bind=engine)
+app = FastAPI(
+    title="SEO NeuroAI Backoffice",
+    description="Professional SaaS backend for accounting, financial and operational automation.",
+    version="3.0.0",
+)
 
-app = FastAPI(title="SEO NeuroAI Backoffice", version="2.0.1")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
-audit_logs = []
+
+def write_audit_log(db: Session, action: str, entity_type: str, entity_id: int | None = None, details: str | None = None) -> None:
+    db.add(AuditLog(action=action, entity_type=entity_type, entity_id=entity_id, details=details))
+
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+    try:
+        payload = decode_access_token(token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token") from exc
+
+    email = payload.get("sub")
+    if not email:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token")
+
+    user = db.query(User).filter(User.email == email).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    return user
 
 
 @app.get("/")
 def root():
-    return {
-        "status": "online",
-        "system": "SEO NeuroAI Backoffice",
-        "neuro_ai": "enabled",
-    }
+    return {"status": "online", "system": "SEO NeuroAI Backoffice", "api": "/api/v1"}
 
 
 @app.get("/health")
@@ -28,48 +48,58 @@ def health():
     return {"status": "healthy"}
 
 
-@app.post("/companies", status_code=status.HTTP_201_CREATED)
-def create_company(company: CompanyCreate, db: Session = Depends(get_db)):
-    db_company = Company(
-        name=company.name,
-        tax_id=company.tax_id,
-        country=company.country,
-    )
+@app.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED)
+def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
+    user = User(email=user_data.email, hashed_password=get_password_hash(user_data.password), role=user_data.role)
+    db.add(user)
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User already exists") from exc
+    db.refresh(user)
+    write_audit_log(db, "user_registered", "user", user.id, user.email)
+    db.commit()
+    return {"id": user.id, "email": user.email, "role": user.role}
 
+
+@app.post("/api/v1/auth/login", response_model=Token)
+def login_user(credentials: UserLogin, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == credentials.email).first()
+    if not user or not verify_password(credentials.password, user.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+    return Token(access_token=create_access_token({"sub": user.email, "role": user.role}))
+
+
+@app.post("/api/v1/companies", status_code=status.HTTP_201_CREATED)
+def create_company(company: CompanyCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    db_company = Company(name=company.name, tax_id=company.tax_id, country=company.country.upper())
     db.add(db_company)
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Company with this tax_id already exists.",
-        ) from exc
-
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Company with this tax_id and country already exists") from exc
     db.refresh(db_company)
-    audit_logs.append({"action": "company_created", "company_id": db_company.id})
+    write_audit_log(db, "company_created", "company", db_company.id, f"created_by={current_user.email}")
+    db.commit()
     return db_company
 
 
-@app.get("/companies")
-def list_companies(db: Session = Depends(get_db)):
-    return db.query(Company).all()
+@app.get("/api/v1/companies")
+def list_companies(limit: int = 50, offset: int = 0, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    limit = min(max(limit, 1), 100)
+    offset = max(offset, 0)
+    return db.query(Company).offset(offset).limit(limit).all()
 
 
-@app.post("/documents", status_code=status.HTTP_201_CREATED)
-def create_document(document: FinancialDocumentCreate, db: Session = Depends(get_db)):
+@app.post("/api/v1/documents", status_code=status.HTTP_201_CREATED)
+def create_document(document: FinancialDocumentCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     company = db.query(Company).filter(Company.id == document.company_id).first()
     if not company:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Company not found.",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
 
-    neuro_result = neuro_ai_engine.classify_document(
-        document.description,
-        document.amount,
-    )
-
+    neuro_result = neuro_ai_engine.classify_document(document.description, float(document.amount))
     db_document = FinancialDocument(
         company_id=document.company_id,
         document_type=document.document_type,
@@ -82,116 +112,61 @@ def create_document(document: FinancialDocumentCreate, db: Session = Depends(get
         category=neuro_result["category"],
         confidence_score=neuro_result["confidence_score"],
     )
-
     db.add(db_document)
     db.commit()
     db.refresh(db_document)
-
-    audit_logs.append(
-        {
-            "action": "document_classified",
-            "document_id": db_document.id,
-            "company_id": db_document.company_id,
-            "category": neuro_result["category"],
-            "confidence_score": neuro_result["confidence_score"],
-        }
-    )
-
-    return {
-        "document": db_document,
-        "neuro_ai": neuro_result,
-    }
+    write_audit_log(db, "document_classified", "document", db_document.id, f"created_by={current_user.email}; category={db_document.category}")
+    db.commit()
+    return {"document": db_document, "neuro_ai": neuro_result}
 
 
-@app.get("/documents")
-def list_documents(db: Session = Depends(get_db)):
-    return db.query(FinancialDocument).all()
+@app.get("/api/v1/documents")
+def list_documents(limit: int = 50, offset: int = 0, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    limit = min(max(limit, 1), 100)
+    offset = max(offset, 0)
+    return db.query(FinancialDocument).offset(offset).limit(limit).all()
 
 
-@app.post("/documents/{document_id}/process")
-def process_document(document_id: int, db: Session = Depends(get_db)):
+@app.post("/api/v1/documents/{document_id}/process")
+def process_document(document_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     document = db.query(FinancialDocument).filter(FinancialDocument.id == document_id).first()
-
     if not document:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found.",
-        )
-
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    if document.status == "processed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Document already processed")
     document.status = "processed"
+    write_audit_log(db, "document_processed", "document", document.id, f"processed_by={current_user.email}")
     db.commit()
     db.refresh(document)
-
-    audit_logs.append({"action": "document_processed", "document_id": document.id})
-
-    return {
-        "message": "processed",
-        "document_id": document.id,
-        "category": document.category,
-        "ai_confidence": document.confidence_score,
-    }
+    return {"message": "processed", "document_id": document.id, "category": document.category, "ai_confidence": document.confidence_score}
 
 
-@app.get("/dashboard/{company_id}")
-def dashboard(company_id: int, db: Session = Depends(get_db)):
+@app.get("/api/v1/dashboard/{company_id}")
+def dashboard(company_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Company not found.",
-        )
-
-    docs = db.query(FinancialDocument).filter(
-        FinancialDocument.company_id == company_id,
-    ).all()
-
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    docs = db.query(FinancialDocument).filter(FinancialDocument.company_id == company_id).all()
     total_expenses = sum(doc.amount for doc in docs)
-
-    neuro_state = neuro_ai_engine.analyze_financial_state(
-        [
-            {
-                "amount": doc.amount,
-                "category": doc.category,
-            }
-            for doc in docs
-        ]
-    )
-
-    return {
-        "company_id": company_id,
-        "company_name": company.name,
-        "documents": len(docs),
-        "total_expenses": total_expenses,
-        "efficiency_score": 87,
-        "neuro_analysis": neuro_state,
-    }
+    neuro_state = neuro_ai_engine.analyze_financial_state([{"amount": float(doc.amount), "category": doc.category} for doc in docs])
+    processed = len([doc for doc in docs if doc.status == "processed"])
+    efficiency_score = round((processed / len(docs)) * 100, 2) if docs else 0
+    return {"company_id": company_id, "company_name": company.name, "documents": len(docs), "total_expenses": total_expenses, "efficiency_score": efficiency_score, "neuro_analysis": neuro_state}
 
 
-@app.get("/companies/{company_id}/neuro-insights")
-def neuro_insights(company_id: int, db: Session = Depends(get_db)):
+@app.get("/api/v1/companies/{company_id}/neuro-insights")
+def neuro_insights(company_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Company not found.",
-        )
-
-    docs = db.query(FinancialDocument).filter(
-        FinancialDocument.company_id == company_id,
-    ).all()
-
-    return neuro_ai_engine.generate_executive_insight(
-        company_id,
-        [
-            {
-                "amount": doc.amount,
-                "category": doc.category,
-            }
-            for doc in docs
-        ],
-    )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+    docs = db.query(FinancialDocument).filter(FinancialDocument.company_id == company_id).all()
+    return neuro_ai_engine.generate_executive_insight(company_id, [{"amount": float(doc.amount), "category": doc.category} for doc in docs])
 
 
-@app.get("/audit-logs")
-def get_logs():
-    return audit_logs
+@app.get("/api/v1/audit-logs")
+def get_logs(limit: int = 50, offset: int = 0, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role not in {"admin", "accountant"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+    limit = min(max(limit, 1), 100)
+    offset = max(offset, 0)
+    return db.query(AuditLog).order_by(AuditLog.created_at.desc()).offset(offset).limit(limit).all()
