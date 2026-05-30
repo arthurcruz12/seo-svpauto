@@ -3,16 +3,18 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import Base, engine, get_db
 from app.models import AuditLog, Company, FinancialDocument, Tenant, User
 from app.neuro_ai import neuro_ai_engine
 from app.schemas import CompanyCreate, FinancialDocumentCreate, Token, UserCreate, UserLogin
 from app.security import create_access_token, create_refresh_token, decode_access_token, decode_refresh_token, get_password_hash, require_permission, verify_password
 
+Base.metadata.create_all(bind=engine)
+
 app = FastAPI(
     title="SEO NeuroAI Backoffice",
     description="Professional SaaS backend for accounting, financial and operational automation.",
-    version="3.1.0",
+    version="3.1.1",
 )
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
