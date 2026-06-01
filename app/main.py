@@ -1,7 +1,12 @@
+import json
+import logging
 import os
+import time
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
@@ -19,11 +24,16 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 if ENVIRONMENT in {"development", "test"}:
     Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="SEO NeuroAI Backoffice", description="Professional SaaS backend for accounting, financial and operational automation.", version="3.2.0")
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = logging.getLogger("seo-api")
+
+app = FastAPI(title="SEO NeuroAI Backoffice", description="Professional SaaS backend for accounting, financial and operational automation.", version="3.3.0")
 
 allowed_origins = os.getenv("CORS_ORIGINS", "*").split(",")
 app.add_middleware(CORSMiddleware, allow_origins=allowed_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=os.getenv("ALLOWED_HOSTS", "*").split(","))
+if ENVIRONMENT == "production" and os.getenv("ENABLE_HTTPS_REDIRECT", "true").lower() == "true":
+    app.add_middleware(HTTPSRedirectMiddleware)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 REQUEST_COUNT = Counter("seo_http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"])
@@ -31,11 +41,16 @@ REQUEST_LATENCY = Histogram("seo_http_request_duration_seconds", "HTTP request l
 
 
 @app.middleware("http")
-async def metrics_middleware(request: Request, call_next):
+async def observability_middleware(request: Request, call_next):
+    request_id = request.headers.get("x-request-id", str(uuid4()))
+    start = time.perf_counter()
     endpoint = request.url.path
     with REQUEST_LATENCY.labels(request.method, endpoint).time():
         response = await call_next(request)
+    duration = round(time.perf_counter() - start, 6)
     REQUEST_COUNT.labels(request.method, endpoint, response.status_code).inc()
+    response.headers["x-request-id"] = request_id
+    logger.info(json.dumps({"request_id": request_id, "method": request.method, "path": endpoint, "status_code": response.status_code, "duration_seconds": duration}))
     return response
 
 
@@ -65,6 +80,17 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+
+@app.get("/ready")
+def ready(db: Session = Depends(get_db)):
+    db.execute("SELECT 1")
+    return {"status": "ready"}
+
+
+@app.get("/live")
+def live():
+    return {"status": "live"}
 
 
 @app.get("/metrics")
