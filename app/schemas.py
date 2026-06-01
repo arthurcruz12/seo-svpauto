@@ -1,8 +1,8 @@
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class Token(BaseModel):
@@ -32,13 +32,12 @@ class UserLogin(BaseModel):
 
 
 class UserRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     tenant_id: int
     email: EmailStr
     role: str
-
-    class Config:
-        from_attributes = True
 
 
 class CompanyCreate(BaseModel):
@@ -48,11 +47,10 @@ class CompanyCreate(BaseModel):
 
 
 class CompanyRead(CompanyCreate):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     tenant_id: int
-
-    class Config:
-        from_attributes = True
 
 
 class FinancialDocumentCreate(BaseModel):
@@ -67,17 +65,38 @@ class FinancialDocumentCreate(BaseModel):
 
 
 class FinancialDocumentRead(FinancialDocumentCreate):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     tenant_id: int
     status: str
     category: Optional[str] = None
     confidence_score: Optional[Decimal] = None
 
-    class Config:
-        from_attributes = True
+
+class NeuroAIResult(BaseModel):
+    category: str
+    confidence_score: float
+    reasoning: str
+
+
+class DocumentCreateResponse(BaseModel):
+    document: FinancialDocumentRead
+    neuro_ai: NeuroAIResult
+
+
+class DashboardResponse(BaseModel):
+    company_id: int
+    company_name: str
+    documents: int
+    total_expenses: Decimal
+    efficiency_score: float
+    neuro_analysis: dict[str, Any]
 
 
 class AuditLogRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     tenant_id: Optional[int] = None
     action: str
@@ -85,6 +104,3 @@ class AuditLogRead(BaseModel):
     entity_id: Optional[int] = None
     details: Optional[str] = None
     created_at: datetime
-
-    class Config:
-        from_attributes = True
