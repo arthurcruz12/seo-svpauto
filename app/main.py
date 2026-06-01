@@ -1,23 +1,42 @@
-from fastapi import Depends, FastAPI, HTTPException, status
+import os
+
+from fastapi import Depends, FastAPI, HTTPException, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.database import Base, engine, get_db
 from app.models import AuditLog, Company, FinancialDocument, Tenant, User
 from app.neuro_ai import neuro_ai_engine
-from app.schemas import CompanyCreate, FinancialDocumentCreate, Token, UserCreate, UserLogin
+from app.schemas import CompanyCreate, FinancialDocumentCreate, RefreshTokenRequest, Token, TokenPair, UserCreate, UserLogin
 from app.security import create_access_token, create_refresh_token, decode_access_token, decode_refresh_token, get_password_hash, require_permission, verify_password
 
-Base.metadata.create_all(bind=engine)
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+if ENVIRONMENT in {"development", "test"}:
+    Base.metadata.create_all(bind=engine)
 
-app = FastAPI(
-    title="SEO NeuroAI Backoffice",
-    description="Professional SaaS backend for accounting, financial and operational automation.",
-    version="3.1.1",
-)
+app = FastAPI(title="SEO NeuroAI Backoffice", description="Professional SaaS backend for accounting, financial and operational automation.", version="3.2.0")
+
+allowed_origins = os.getenv("CORS_ORIGINS", "*").split(",")
+app.add_middleware(CORSMiddleware, allow_origins=allowed_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=os.getenv("ALLOWED_HOSTS", "*").split(","))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+REQUEST_COUNT = Counter("seo_http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"])
+REQUEST_LATENCY = Histogram("seo_http_request_duration_seconds", "HTTP request latency", ["method", "endpoint"])
+
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    endpoint = request.url.path
+    with REQUEST_LATENCY.labels(request.method, endpoint).time():
+        response = await call_next(request)
+    REQUEST_COUNT.labels(request.method, endpoint, response.status_code).inc()
+    return response
 
 
 def write_audit_log(db: Session, tenant_id: int | None, action: str, entity_type: str, entity_id: int | None = None, details: str | None = None) -> None:
@@ -48,6 +67,11 @@ def health():
     return {"status": "healthy"}
 
 
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 @app.post("/api/v1/auth/register", status_code=status.HTTP_201_CREATED)
 def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     tenant = Tenant(name=f"{user_data.email} tenant")
@@ -66,22 +90,22 @@ def register_user(user_data: UserCreate, db: Session = Depends(get_db)):
     return {"id": user.id, "tenant_id": user.tenant_id, "email": user.email, "role": user.role}
 
 
-@app.post("/api/v1/auth/login")
+@app.post("/api/v1/auth/login", response_model=TokenPair)
 def login_user(credentials: UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.email == credentials.email).first()
     if not user or not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
     token_payload = {"sub": user.email, "role": user.role, "tenant_id": user.tenant_id}
-    return {"access_token": create_access_token(token_payload), "refresh_token": create_refresh_token(token_payload), "token_type": "bearer"}
+    return TokenPair(access_token=create_access_token(token_payload), refresh_token=create_refresh_token(token_payload))
 
 
 @app.post("/api/v1/auth/refresh", response_model=Token)
-def refresh_access_token(refresh_token: str, db: Session = Depends(get_db)):
+def refresh_access_token(payload: RefreshTokenRequest, db: Session = Depends(get_db)):
     try:
-        payload = decode_refresh_token(refresh_token)
+        token_payload = decode_refresh_token(payload.refresh_token)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token") from exc
-    email = payload.get("sub")
+    email = token_payload.get("sub")
     user = db.query(User).filter(User.email == email).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
@@ -107,9 +131,7 @@ def create_company(company: CompanyCreate, db: Session = Depends(get_db), curren
 @app.get("/api/v1/companies")
 def list_companies(limit: int = 50, offset: int = 0, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     require_permission(current_user, "companies:read")
-    limit = min(max(limit, 1), 100)
-    offset = max(offset, 0)
-    return db.query(Company).filter(Company.tenant_id == current_user.tenant_id).offset(offset).limit(limit).all()
+    return db.query(Company).filter(Company.tenant_id == current_user.tenant_id).offset(max(offset, 0)).limit(min(max(limit, 1), 100)).all()
 
 
 @app.post("/api/v1/documents", status_code=status.HTTP_201_CREATED)
@@ -131,9 +153,7 @@ def create_document(document: FinancialDocumentCreate, db: Session = Depends(get
 @app.get("/api/v1/documents")
 def list_documents(limit: int = 50, offset: int = 0, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     require_permission(current_user, "documents:read")
-    limit = min(max(limit, 1), 100)
-    offset = max(offset, 0)
-    return db.query(FinancialDocument).filter(FinancialDocument.tenant_id == current_user.tenant_id).offset(offset).limit(limit).all()
+    return db.query(FinancialDocument).filter(FinancialDocument.tenant_id == current_user.tenant_id).offset(max(offset, 0)).limit(min(max(limit, 1), 100)).all()
 
 
 @app.post("/api/v1/documents/{document_id}/process")
@@ -178,6 +198,4 @@ def neuro_insights(company_id: int, db: Session = Depends(get_db), current_user:
 @app.get("/api/v1/audit-logs")
 def get_logs(limit: int = 50, offset: int = 0, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     require_permission(current_user, "audit:read")
-    limit = min(max(limit, 1), 100)
-    offset = max(offset, 0)
-    return db.query(AuditLog).filter(AuditLog.tenant_id == current_user.tenant_id).order_by(AuditLog.created_at.desc()).offset(offset).limit(limit).all()
+    return db.query(AuditLog).filter(AuditLog.tenant_id == current_user.tenant_id).order_by(AuditLog.created_at.desc()).offset(max(offset, 0)).limit(min(max(limit, 1), 100)).all()
