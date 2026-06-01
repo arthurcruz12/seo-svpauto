@@ -13,6 +13,10 @@ jobs:
     env:
       DATABASE_URL: sqlite:///./test_seo.db
       PYTHONPATH: ${{ github.workspace }}
+      ENVIRONMENT: test
+      SECRET_KEY: test-secret-key
+      CORS_ORIGINS: '*'
+      ALLOWED_HOSTS: '*'
 
     steps:
       - name: Checkout repository
@@ -29,6 +33,18 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run tests
+      - name: Lint backend
         run: |
-          python -m pytest -q
+          ruff check app tests
+
+      - name: Validate Alembic migrations
+        run: |
+          alembic upgrade head
+
+      - name: Run tests with coverage
+        run: |
+          python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=70 -q
+
+      - name: Build Docker image
+        run: |
+          docker build .
