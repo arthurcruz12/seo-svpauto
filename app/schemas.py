@@ -55,12 +55,17 @@ class CompanyRead(CompanyCreate):
 
 class FinancialDocumentCreate(BaseModel):
     company_id: int
-    document_type: str = Field(..., min_length=2)
+    document_type: Literal["invoice", "invoice_receipt", "credit_note", "debit_note", "receipt"]
+    document_number: Optional[str] = None
     supplier: str = Field(..., min_length=2)
-    amount: Decimal = Field(..., ge=0)
-    vat_amount: Decimal = Field(Decimal("0.00"), ge=0)
+    amount: Decimal
+    net_amount: Optional[Decimal] = None
+    vat_amount: Decimal = Decimal("0.00")
     currency: Literal["EUR", "USD", "GBP", "BRL"] = "EUR"
     issue_date: date
+    due_date: Optional[date] = None
+    payment_method: Optional[Literal["direct_debit", "bank_transfer", "card", "cash", "other", "unknown"]] = "unknown"
+    is_paid: bool = False
     description: str = Field(..., min_length=3)
 
 
@@ -72,6 +77,7 @@ class FinancialDocumentRead(FinancialDocumentCreate):
     status: str
     category: Optional[str] = None
     confidence_score: Optional[Decimal] = None
+    original_amount: Decimal
 
 
 class NeuroAIResult(BaseModel):
