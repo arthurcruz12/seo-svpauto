@@ -10,6 +10,7 @@ from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from fastapi.responses import Response
 from fastapi.security import OAuth2PasswordBearer
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -17,7 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.database import Base, engine, get_db
 from app.models import AuditLog, Company, FinancialDocument, Tenant, User
 from app.neuro_ai import neuro_ai_engine
-from app.schemas import CompanyCreate, FinancialDocumentCreate, RefreshTokenRequest, Token, TokenPair, UserCreate, UserLogin
+from app.schemas import CompanyCreate, CompanyRead, DocumentCreateResponse, FinancialDocumentCreate, RefreshTokenRequest, Token, TokenPair, UserCreate, UserLogin
 from app.security import create_access_token, create_refresh_token, decode_access_token, decode_refresh_token, get_password_hash, require_permission, verify_password
 
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
@@ -84,7 +85,7 @@ def health():
 
 @app.get("/ready")
 def ready(db: Session = Depends(get_db)):
-    db.execute("SELECT 1")
+    db.execute(text("SELECT 1"))
     return {"status": "ready"}
 
 
@@ -138,7 +139,7 @@ def refresh_access_token(payload: RefreshTokenRequest, db: Session = Depends(get
     return Token(access_token=create_access_token({"sub": user.email, "role": user.role, "tenant_id": user.tenant_id}))
 
 
-@app.post("/api/v1/companies", status_code=status.HTTP_201_CREATED)
+@app.post("/api/v1/companies", status_code=status.HTTP_201_CREATED, response_model=CompanyRead)
 def create_company(company: CompanyCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     require_permission(current_user, "companies:write")
     db_company = Company(tenant_id=current_user.tenant_id, name=company.name, tax_id=company.tax_id, country=company.country.upper())
@@ -160,16 +161,38 @@ def list_companies(limit: int = 50, offset: int = 0, db: Session = Depends(get_d
     return db.query(Company).filter(Company.tenant_id == current_user.tenant_id).offset(max(offset, 0)).limit(min(max(limit, 1), 100)).all()
 
 
-@app.post("/api/v1/documents", status_code=status.HTTP_201_CREATED)
+@app.post("/api/v1/documents", status_code=status.HTTP_201_CREATED, response_model=DocumentCreateResponse)
 def create_document(document: FinancialDocumentCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     require_permission(current_user, "documents:write")
     company = db.query(Company).filter(Company.id == document.company_id, Company.tenant_id == current_user.tenant_id).first()
     if not company:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
-    neuro_result = neuro_ai_engine.classify_document(document.description, float(document.amount))
-    db_document = FinancialDocument(tenant_id=current_user.tenant_id, company_id=document.company_id, document_type=document.document_type, supplier=document.supplier, amount=document.amount, vat_amount=document.vat_amount, currency=document.currency, issue_date=document.issue_date, description=document.description, category=neuro_result["category"], confidence_score=neuro_result["confidence_score"])
+    original_amount = abs(document.amount)
+    normalized_amount = -original_amount if document.document_type == "credit_note" else original_amount
+    net_amount = document.net_amount if document.net_amount is not None else original_amount - document.vat_amount
+    normalized_net = -abs(net_amount) if document.document_type == "credit_note" else abs(net_amount)
+    normalized_vat = -abs(document.vat_amount) if document.document_type == "credit_note" else abs(document.vat_amount)
+    if abs(normalized_net + normalized_vat - normalized_amount) > 0.02:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Net amount plus VAT must equal total amount")
+    if document.due_date and document.due_date < document.issue_date:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Due date cannot be before issue date")
+    neuro_result = neuro_ai_engine.classify_document(document.description, float(normalized_amount))
+    db_document = FinancialDocument(
+        tenant_id=current_user.tenant_id, company_id=document.company_id,
+        document_type=document.document_type, document_number=document.document_number,
+        supplier=document.supplier, amount=normalized_amount, original_amount=original_amount,
+        net_amount=normalized_net, vat_amount=normalized_vat, currency=document.currency,
+        issue_date=document.issue_date, due_date=document.due_date,
+        payment_method=document.payment_method, is_paid=document.is_paid,
+        description=document.description, category=neuro_result["category"],
+        confidence_score=neuro_result["confidence_score"],
+    )
     db.add(db_document)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Duplicate document number") from exc
     db.refresh(db_document)
     write_audit_log(db, current_user.tenant_id, "document_classified", "document", db_document.id, f"created_by={current_user.email}; category={db_document.category}")
     db.commit()
