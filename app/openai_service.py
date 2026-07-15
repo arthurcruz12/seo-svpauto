@@ -4,9 +4,11 @@ from app.config import settings
 
 class OpenAIService:
     def __init__(self):
-        self.client = OpenAI(api_key=settings.openai_api_key)
+        self.client = OpenAI(api_key=settings.openai_api_key) if settings.openai_api_key else None
 
     def generate_financial_insight(self, prompt: str) -> str:
+        if self.client is None:
+            return 'OpenAI service is not configured.'
         try:
             response = self.client.chat.completions.create(
                 model='gpt-4.1-mini',
