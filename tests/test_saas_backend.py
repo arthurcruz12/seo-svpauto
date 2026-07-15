@@ -137,3 +137,56 @@ def test_tenant_isolation_between_users():
     assert list_b.status_code == 200
     names_b = [company["name"] for company in list_b.json()]
     assert "Tenant A" not in names_b
+
+
+def test_credit_note_is_normalized_to_negative_values():
+    email = unique_email("credit-note")
+    register(email)
+    headers = auth_headers(login(email)["access_token"])
+    company = client.post("/api/v1/companies", headers=headers, json={"name": "Credit Test", "tax_id": f"C{uuid4().hex[:8]}", "country": "PT"})
+    company_id = company.json()["id"]
+    response = client.post(
+        "/api/v1/documents",
+        headers=headers,
+        json={
+            "company_id": company_id,
+            "document_type": "credit_note",
+            "document_number": f"NC-{uuid4().hex[:8]}",
+            "supplier": "Fornecedor Teste",
+            "amount": "123.00",
+            "net_amount": "100.00",
+            "vat_amount": "23.00",
+            "currency": "EUR",
+            "issue_date": str(date.today()),
+            "description": "devolução de material",
+        },
+    )
+    assert response.status_code == 201
+    document = response.json()["document"]
+    assert document["amount"] == "-123.00"
+    assert document["net_amount"] == "-100.00"
+    assert document["vat_amount"] == "-23.00"
+    assert document["original_amount"] == "123.00"
+
+
+def test_rejects_inconsistent_vat_total():
+    email = unique_email("invalid-vat")
+    register(email)
+    headers = auth_headers(login(email)["access_token"])
+    company = client.post("/api/v1/companies", headers=headers, json={"name": "VAT Test", "tax_id": f"V{uuid4().hex[:8]}", "country": "PT"})
+    response = client.post(
+        "/api/v1/documents",
+        headers=headers,
+        json={
+            "company_id": company.json()["id"],
+            "document_type": "invoice",
+            "supplier": "Fornecedor Teste",
+            "amount": "100.00",
+            "net_amount": "90.00",
+            "vat_amount": "23.00",
+            "currency": "EUR",
+            "issue_date": str(date.today()),
+            "description": "fatura inconsistente",
+        },
+    )
+    assert response.status_code == 422
