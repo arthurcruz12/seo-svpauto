@@ -1,7 +1,8 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file='.env', extra='ignore')
     app_name: str = 'SEO NeuroAI'
     environment: str = 'development'
     database_url: str = 'postgresql+psycopg2://seo:seo@postgres:5432/seo_neuroai'
@@ -11,9 +12,5 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ''
     stripe_webhook_secret: str = ''
     rate_limit_per_minute: int = 60
-
-    class Config:
-        env_file = '.env'
-
 
 settings = Settings()
