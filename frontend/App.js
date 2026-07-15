@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView, View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
 
-const API_URL = 'http://127.0.0.1:8000';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://127.0.0.1:8000/api/v1';
 
 export default function App() {
   const [dashboard, setDashboard] = useState(null);
@@ -9,17 +9,44 @@ export default function App() {
   const [insights, setInsights] = useState(null);
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
+  const [token, setToken] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const authHeaders = (withJson = false) => ({
+    Authorization: `Bearer ${token}`,
+    ...(withJson ? { 'Content-Type': 'application/json' } : {})
+  });
+
+  async function login() {
+    setError('');
+    try {
+      const response = await fetch(`${API_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Login failed');
+      setToken(data.access_token);
+    } catch (e) {
+      setError(e.message);
+    }
+  }
 
   async function loadData() {
-    const dashboardResponse = await fetch(`${API_URL}/dashboard/1`);
+    if (!token) return;
+    const dashboardResponse = await fetch(`${API_URL}/dashboard/1`, { headers: authHeaders() });
+    if (!dashboardResponse.ok) throw new Error('Unable to load dashboard');
     const dashboardData = await dashboardResponse.json();
     setDashboard(dashboardData);
 
-    const documentsResponse = await fetch(`${API_URL}/documents`);
+    const documentsResponse = await fetch(`${API_URL}/documents`, { headers: authHeaders() });
     const documentsData = await documentsResponse.json();
     setDocuments(documentsData);
 
-    const insightsResponse = await fetch(`${API_URL}/companies/1/neuro-insights`);
+    const insightsResponse = await fetch(`${API_URL}/companies/1/neuro-insights`, { headers: authHeaders() });
     const insightsData = await insightsResponse.json();
     setInsights(insightsData);
   }
@@ -27,9 +54,7 @@ export default function App() {
   async function createDocument() {
     await fetch(`${API_URL}/documents`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
+      headers: authHeaders(true),
       body: JSON.stringify({
         company_id: 1,
         document_type: 'invoice',
@@ -37,7 +62,7 @@ export default function App() {
         amount: Number(amount),
         vat_amount: Number(amount) * 0.23,
         currency: 'EUR',
-        issue_date: '2026-05-28',
+        issue_date: new Date().toISOString().slice(0, 10),
         description
       })
     });
@@ -49,14 +74,28 @@ export default function App() {
   }
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (token) loadData().catch((e) => setError(e.message));
+  }, [token]);
+
+  if (!token) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <Text style={styles.logo}>SEO NeuroAI</Text>
+        <Text style={styles.subtitle}>Secure access</Text>
+        <TextInput style={styles.input} placeholder='Email' placeholderTextColor='#94A3B8' autoCapitalize='none' value={email} onChangeText={setEmail} />
+        <TextInput style={styles.input} placeholder='Password' placeholderTextColor='#94A3B8' secureTextEntry value={password} onChangeText={setPassword} />
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+        <TouchableOpacity style={styles.button} onPress={login}><Text style={styles.buttonText}>Sign in</Text></TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <Text style={styles.logo}>SEO NeuroAI</Text>
         <Text style={styles.subtitle}>Operational Intelligence Infrastructure</Text>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <View style={styles.heroCard}>
           <Text style={styles.heroTitle}>Executive Dashboard</Text>
@@ -191,6 +230,10 @@ const styles = StyleSheet.create({
   insightText: {
     color: '#CBD5E1',
     lineHeight: 22
+  },
+  error: {
+    color: '#F87171',
+    marginBottom: 14
   },
   input: {
     backgroundColor: '#111827',
