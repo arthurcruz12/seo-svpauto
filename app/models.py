@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -51,16 +51,25 @@ class Company(Base):
 
 class FinancialDocument(Base):
     __tablename__ = "financial_documents"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "company_id", "document_number", name="uq_document_tenant_company_number"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
     company_id = Column(Integer, ForeignKey("companies.id"), nullable=False, index=True)
     document_type = Column(String, nullable=False)
+    document_number = Column(String, nullable=True, index=True)
     supplier = Column(String, nullable=False)
     amount = Column(Numeric(12, 2), nullable=False)
+    net_amount = Column(Numeric(12, 2), nullable=False, default=0)
     vat_amount = Column(Numeric(12, 2), default=0, nullable=False)
+    original_amount = Column(Numeric(12, 2), nullable=False, default=0)
     currency = Column(String(3), default="EUR", nullable=False)
     issue_date = Column(Date, nullable=False)
+    due_date = Column(Date, nullable=True)
+    payment_method = Column(String, nullable=True)
+    is_paid = Column(Boolean, nullable=False, default=False)
     description = Column(String, nullable=False)
     status = Column(String, default="uploaded", nullable=False)
     category = Column(String, nullable=True)
