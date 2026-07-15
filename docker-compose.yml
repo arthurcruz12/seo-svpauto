@@ -7,9 +7,7 @@ services:
     environment:
       POSTGRES_DB: seo
       POSTGRES_USER: seo_user
-      POSTGRES_PASSWORD: seo_password
-    ports:
-      - '5432:5432'
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - postgres_backups:/backups
@@ -26,7 +24,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      PGPASSWORD: seo_password
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
     volumes:
       - postgres_backups:/backups
     command: >
@@ -43,13 +41,13 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://seo_user:seo_password@postgres:5432/seo
-      SECRET_KEY: change-this-secret-key-in-production
+      DATABASE_URL: postgresql://seo_user:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/seo
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
       REFRESH_TOKEN_EXPIRE_DAYS: 7
-      ENVIRONMENT: development
-      CORS_ORIGINS: '*'
-      ALLOWED_HOSTS: '*'
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:19006}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,testserver}
       ENABLE_HTTPS_REDIRECT: 'false'
     ports:
       - '8000:8000'
