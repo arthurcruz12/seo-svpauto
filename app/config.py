@@ -14,3 +14,6 @@ class Settings(BaseSettings):
     rate_limit_per_minute: int = 60
 
 settings = Settings()
+
+if settings.environment == 'production' and settings.secret_key == 'change-this-secret-in-production':
+    raise RuntimeError('SECRET_KEY must be configured in production')
