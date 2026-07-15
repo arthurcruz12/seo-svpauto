@@ -7,6 +7,8 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-secret-key-in-production")
+if os.getenv("ENVIRONMENT", "development") == "production" and SECRET_KEY == "change-this-secret-key-in-production":
+    raise RuntimeError("SECRET_KEY must be configured in production")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
