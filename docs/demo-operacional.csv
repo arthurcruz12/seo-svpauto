@@ -1,0 +1,6 @@
+documento;data emissao;data vencimento;entidade;descricao;codigo unidade;quantidade sistema;quantidade fisica;quantidade movimento;custo unitario;valor em aberto;estado
+FT CUSA/101;2026-07-01;2026-07-31;Oficina Coimbra Lda;Venda de motor usado;CUSA;8;7;1;450,00;553,50;Pendente
+FT CNOV/102;2026-07-02;2026-08-01;Cliente Novo Coimbra;Compra de faróis novos;CNOV;20;20;5;80,00;0;Liquidado
+FT PUSA/201;2026-07-03;2026-08-02;Garagem Picoto Lda;Venda de caixa usada;PUSA;6;5;1;300,00;369,00;Pendente
+MOV CUSA/1;2026-07-04;;Operação interna;Saída para sucata;CUSA;4;3;1;25,00;0;Concluído
+MOV PNOV/1;2026-07-05;;Fornecedor Picoto;Compra de peças novas;PNOV;12;12;4;45,00;0;Recebido

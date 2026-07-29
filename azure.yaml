@@ -1,0 +1,10 @@
+name: seo-eficiencia-operacional
+services:
+  api:
+    project: ./backend
+    host: containerapp
+    language: python
+  web:
+    project: ./
+    host: staticwebapp
+    language: js
