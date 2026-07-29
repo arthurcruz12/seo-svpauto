@@ -1,5 +1,0 @@
-react
-react-native
-expo
-expo-status-bar
-@expo/vector-icons

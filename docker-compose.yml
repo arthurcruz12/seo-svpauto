@@ -1,69 +1,36 @@
-version: '3.9'
-
 services:
+  api:
+    build:
+      context: ./backend
+    container_name: seo-api
+    restart: unless-stopped
+    environment:
+      SEO_ENV: development
+      SEO_DATABASE_PATH: /app/storage/seo.sqlite3
+      OCR_LANGUAGE: por+eng
+    ports:
+      - "8000:8000"
+    volumes:
+      - seo_api_storage:/app/storage
+
   postgres:
     image: postgres:16
     container_name: seo-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: seo
       POSTGRES_USER: seo_user
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: seo_password_change_me
+    ports:
+      - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - postgres_backups:/backups
+      - seo_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U seo_user -d seo']
+      test: ["CMD-SHELL", "pg_isready -U seo_user -d seo"]
       interval: 10s
       timeout: 5s
       retries: 5
 
-  postgres-backup:
-    image: postgres:16
-    container_name: seo-postgres-backup
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
-    volumes:
-      - postgres_backups:/backups
-    command: >
-      sh -c "while true; do
-      pg_dump -h postgres -U seo_user -d seo > /backups/seo_$$(date +%Y%m%d_%H%M%S).sql;
-      find /backups -type f -name '*.sql' -mtime +14 -delete;
-      sleep 86400;
-      done"
-
-  backend:
-    build: .
-    container_name: seo-neuroai-backend
-    depends_on:
-      postgres:
-        condition: service_healthy
-    environment:
-      DATABASE_URL: postgresql://seo_user:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/seo
-      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
-      ACCESS_TOKEN_EXPIRE_MINUTES: 30
-      REFRESH_TOKEN_EXPIRE_DAYS: 7
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:19006}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,testserver}
-      ENABLE_HTTPS_REDIRECT: 'false'
-    ports:
-      - '8000:8000'
-    volumes:
-      - .:/app
-
-  frontend:
-    image: node:20
-    container_name: seo-neuroai-frontend
-    working_dir: /frontend
-    command: sh -c 'npm install && npm start'
-    ports:
-      - '19000:19000'
-    volumes:
-      - ./frontend:/frontend
-
 volumes:
-  postgres_data:
-  postgres_backups:
+  seo_api_storage:
+  seo_postgres_data:

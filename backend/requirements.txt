@@ -1,0 +1,16 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+email-validator==2.2.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-jose[cryptography]==3.3.0
+openpyxl==3.1.5
+pypdf==5.7.0
+pymupdf==1.26.3
+pytesseract==0.3.13
+Pillow==11.3.0
+pypdfium2==4.30.0
+rapidocr_onnxruntime==1.4.4
+azure-storage-blob==12.25.1

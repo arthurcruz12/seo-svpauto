@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<AuditFile xmlns="urn:OECD:StandardAuditFile-Tax:PT_1.04_01">
+  <SourceDocuments>
+    <SalesInvoices>
+      <Invoice>
+        <InvoiceNo>FT 2026/1</InvoiceNo>
+        <InvoiceDate>2026-07-01</InvoiceDate>
+        <CustomerID>CLIENTE-1</CustomerID>
+        <Line>
+          <Description>Venda de peça automóvel</Description>
+          <CreditAmount>100.00</CreditAmount>
+        </Line>
+        <DocumentTotals>
+          <TaxPayable>23.00</TaxPayable>
+          <NetTotal>100.00</NetTotal>
+          <GrossTotal>123.00</GrossTotal>
+        </DocumentTotals>
+      </Invoice>
+    </SalesInvoices>
+  </SourceDocuments>
+</AuditFile>
