@@ -1,0 +1,49 @@
+name: Persist restored frontend assets
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/persist-restored-frontend.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  persist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download restored frontend assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://seo-svpauto-bsjdt0ajh-arthurcruz12s-projects.vercel.app'
+          mkdir -p legacy/assets
+          curl --fail --location --silent --show-error "$base/assets/index-DifEdwF3.js" -o legacy/assets/index-DifEdwF3.js
+          curl --fail --location --silent --show-error "$base/assets/react-SLA1hOw8.js" -o legacy/assets/react-SLA1hOw8.js
+          curl --fail --location --silent --show-error "$base/assets/icons-CNAm9td9.js" -o legacy/assets/icons-CNAm9td9.js
+          curl --fail --location --silent --show-error "$base/assets/index-C6S3n_g7.css" -o legacy/assets/index-C6S3n_g7.css
+          test "$(wc -c < legacy/assets/index-DifEdwF3.js)" -gt 100000
+          test "$(wc -c < legacy/assets/react-SLA1hOw8.js)" -gt 100000
+          test "$(wc -c < legacy/assets/icons-CNAm9td9.js)" -gt 5000
+          test "$(wc -c < legacy/assets/index-C6S3n_g7.css)" -gt 30000
+
+      - name: Commit assets to repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add legacy/assets
+          if git diff --cached --quiet; then
+            echo 'Assets already persisted.'
+            exit 0
+          fi
+          git commit -m 'fix: persist restored legacy frontend assets'
+          git push origin HEAD:main
