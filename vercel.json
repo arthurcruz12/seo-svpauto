@@ -1,10 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
-    "deploymentEnabled": true
+    "deploymentEnabled": false
   },
-  "installCommand": "echo protection-read-diagnostic",
-  "buildCommand": "vercel project protection seo-svpauto --format json; exit 1",
+  "installCommand": "echo legacy-frontend",
+  "buildCommand": "mkdir -p dist && cp legacy/index.html dist/index.html",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
@@ -13,7 +13,7 @@
       "destination": "https://sistemaeficienciaoperacional.duckdns.org/:path*"
     },
     {
-      "source": "/((?!api/|seo-api/|assets/).*)",
+      "source": "/((?!api/|seo-api/).*)",
       "destination": "/index.html"
     }
   ]
