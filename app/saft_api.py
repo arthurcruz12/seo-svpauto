@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -8,7 +9,9 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.ai_database import AIStorageUnavailable, ai_database_configured, get_ai_db
 from app.database import get_db
+from app.integrations import infrastructure_status
 from app.models import AuditLog, Company, User
 from app.saft_models import SaftAnomaly, SaftImport, SaftStagedDocument
 from app.saft_service import normalize_saft
@@ -17,6 +20,7 @@ from app.security import decode_access_token, require_permission
 router = APIRouter(prefix="/api/v1/saft", tags=["SAF-T"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 MAX_SAFT_BYTES = int(os.getenv("SAFT_MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
+logger = logging.getLogger("seo-api.saft")
 
 
 def _enabled() -> bool:
@@ -29,6 +33,21 @@ def _require_feature() -> None:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="SAF-T integration is disabled by feature flag",
         )
+    if not ai_database_configured():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI/SAF-T database is not configured",
+        )
+
+
+def get_ai_session():
+    try:
+        yield from get_ai_db()
+    except AIStorageUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI/SAF-T database is unavailable",
+        ) from exc
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
@@ -57,9 +76,9 @@ def _audit(db: Session, tenant_id: int, action: str, entity_id: int | None, deta
     )
 
 
-def _get_import(db: Session, current_user: User, import_id: int) -> SaftImport:
+def _get_import(ai_db: Session, current_user: User, import_id: int) -> SaftImport:
     item = (
-        db.query(SaftImport)
+        ai_db.query(SaftImport)
         .filter(SaftImport.id == import_id, SaftImport.tenant_id == current_user.tenant_id)
         .first()
     )
@@ -73,10 +92,13 @@ def saft_status(current_user: User = Depends(get_current_user)):
     require_permission(current_user, "saft:read")
     return {
         "enabled": _enabled(),
-        "mode": "read_only_staging",
+        "mode": "isolated_read_only_staging",
+        "ai_database_configured": ai_database_configured(),
+        "writes_to_operational_database": False,
         "writes_to_financial_documents": False,
         "writes_to_snc": False,
         "validation_mode": "safe_xml_and_structural",
+        "infrastructure": infrastructure_status(),
     }
 
 
@@ -85,11 +107,13 @@ async def import_saft(
     company_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
+    ai_db: Session = Depends(get_ai_session),
     current_user: User = Depends(get_current_user),
 ):
     _require_feature()
     require_permission(current_user, "saft:write")
 
+    # Company and tenant authorization always come from the operational database.
     company = (
         db.query(Company)
         .filter(Company.id == company_id, Company.tenant_id == current_user.tenant_id)
@@ -112,7 +136,7 @@ async def import_saft(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
     existing = (
-        db.query(SaftImport)
+        ai_db.query(SaftImport)
         .filter(
             SaftImport.tenant_id == current_user.tenant_id,
             SaftImport.company_id == company.id,
@@ -154,8 +178,8 @@ async def import_saft(
         raw_file_reference=None,
         created_by=current_user.email,
     )
-    db.add(saft_import)
-    db.flush()
+    ai_db.add(saft_import)
+    ai_db.flush()
 
     seen_numbers: set[str] = set()
     staged_count = 0
@@ -165,7 +189,7 @@ async def import_saft(
             continue
         if number:
             seen_numbers.add(number)
-        db.add(
+        ai_db.add(
             SaftStagedDocument(
                 tenant_id=current_user.tenant_id,
                 company_id=company.id,
@@ -185,7 +209,7 @@ async def import_saft(
         staged_count += 1
 
     for anomaly in normalized["anomalies"]:
-        db.add(
+        ai_db.add(
             SaftAnomaly(
                 tenant_id=current_user.tenant_id,
                 company_id=company.id,
@@ -198,7 +222,7 @@ async def import_saft(
         )
 
     if errors:
-        db.add(
+        ai_db.add(
             SaftAnomaly(
                 tenant_id=current_user.tenant_id,
                 company_id=company.id,
@@ -209,28 +233,38 @@ async def import_saft(
             )
         )
 
-    _audit(
-        db,
-        current_user.tenant_id,
-        "saft_import_staged",
-        saft_import.id,
-        {
-            "company_id": company.id,
-            "filename": filename,
-            "sha256": normalized["sha256"],
-            "status": import_status,
-            "staged_documents": staged_count,
-            "anomalies": normalized["counts"]["anomalies"],
-            "writes_to_financial_documents": False,
-            "writes_to_snc": False,
-        },
-    )
-
+    # Commit isolated staging first. A failure cannot mutate operational tables.
     try:
-        db.commit()
+        ai_db.commit()
+        ai_db.refresh(saft_import)
     except IntegrityError as exc:
-        db.rollback()
+        ai_db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="SAF-T staging conflict") from exc
+
+    audit_logged = True
+    try:
+        _audit(
+            db,
+            current_user.tenant_id,
+            "saft_import_staged",
+            saft_import.id,
+            {
+                "company_id": company.id,
+                "filename": filename,
+                "sha256": normalized["sha256"],
+                "status": import_status,
+                "staged_documents": staged_count,
+                "anomalies": normalized["counts"]["anomalies"],
+                "storage": "isolated_ai_database",
+                "writes_to_financial_documents": False,
+                "writes_to_snc": False,
+            },
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        audit_logged = False
+        logger.exception("SAF-T import staged but operational audit log could not be written")
 
     return {
         "id": saft_import.id,
@@ -242,8 +276,11 @@ async def import_saft(
         "validation": {**validation, "errors": errors, "warnings": warnings},
         "safety": {
             "read_only_staging": True,
+            "isolated_ai_database": True,
+            "operational_database_unchanged": True,
             "financial_documents_unchanged": True,
             "snc_execution_enabled": False,
+            "audit_logged": audit_logged,
             "raw_file_storage": "integration_required",
         },
     }
@@ -253,11 +290,11 @@ async def import_saft(
 def list_saft_imports(
     company_id: int | None = None,
     limit: int = 50,
-    db: Session = Depends(get_db),
+    ai_db: Session = Depends(get_ai_session),
     current_user: User = Depends(get_current_user),
 ):
     require_permission(current_user, "saft:read")
-    query = db.query(SaftImport).filter(SaftImport.tenant_id == current_user.tenant_id)
+    query = ai_db.query(SaftImport).filter(SaftImport.tenant_id == current_user.tenant_id)
     if company_id is not None:
         query = query.filter(SaftImport.company_id == company_id)
     items = query.order_by(SaftImport.created_at.desc()).limit(min(max(limit, 1), 100)).all()
@@ -282,11 +319,11 @@ def list_saft_imports(
 @router.get("/imports/{import_id}")
 def get_saft_import(
     import_id: int,
-    db: Session = Depends(get_db),
+    ai_db: Session = Depends(get_ai_session),
     current_user: User = Depends(get_current_user),
 ):
     require_permission(current_user, "saft:read")
-    item = _get_import(db, current_user, import_id)
+    item = _get_import(ai_db, current_user, import_id)
     return {
         "id": item.id,
         "company_id": item.company_id,
@@ -312,13 +349,13 @@ def get_saft_import(
 def preview_saft_import(
     import_id: int,
     limit: int = 100,
-    db: Session = Depends(get_db),
+    ai_db: Session = Depends(get_ai_session),
     current_user: User = Depends(get_current_user),
 ):
     require_permission(current_user, "saft:read")
-    item = _get_import(db, current_user, import_id)
+    item = _get_import(ai_db, current_user, import_id)
     documents = (
-        db.query(SaftStagedDocument)
+        ai_db.query(SaftStagedDocument)
         .filter(
             SaftStagedDocument.saft_import_id == item.id,
             SaftStagedDocument.tenant_id == current_user.tenant_id,
@@ -330,6 +367,7 @@ def preview_saft_import(
         "import_id": item.id,
         "status": item.status,
         "read_only": True,
+        "storage": "isolated_ai_database",
         "documents": [
             {
                 "document_number": document.document_number,
@@ -350,13 +388,13 @@ def preview_saft_import(
 @router.get("/imports/{import_id}/anomalies")
 def saft_anomalies(
     import_id: int,
-    db: Session = Depends(get_db),
+    ai_db: Session = Depends(get_ai_session),
     current_user: User = Depends(get_current_user),
 ):
     require_permission(current_user, "saft:read")
-    item = _get_import(db, current_user, import_id)
+    item = _get_import(ai_db, current_user, import_id)
     anomalies = (
-        db.query(SaftAnomaly)
+        ai_db.query(SaftAnomaly)
         .filter(SaftAnomaly.saft_import_id == item.id, SaftAnomaly.tenant_id == current_user.tenant_id)
         .order_by(SaftAnomaly.id.asc())
         .all()
