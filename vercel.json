@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
-    "deploymentEnabled": false
+    "deploymentEnabled": true
   },
   "installCommand": "echo legacy-redirect",
   "buildCommand": "mkdir -p dist && cp legacy/redirect.html dist/index.html",
