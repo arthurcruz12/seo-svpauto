@@ -1,6 +1,6 @@
 import base64
-import http.cookiejar
 import json
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -22,17 +22,15 @@ class handler(BaseHTTPRequestHandler):
             return self._legacy(query, mode)
         return self._health()
 
-    def _legacy_opener(self, token):
-        jar = http.cookiejar.CookieJar()
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-        auth_url = f"https://{LEGACY_HOST}/?_vercel_share={urllib.parse.quote(token)}"
-        opener.open(auth_url, timeout=15).read(128)
-        return opener
-
-    def _fetch_legacy(self, opener, asset_path):
+    def _fetch_legacy(self, asset_path):
+        bypass = os.getenv("VERCEL_AUTOMATION_BYPASS_SECRET")
+        headers = {"User-Agent": "seo-legacy-recovery/1.0"}
+        if bypass:
+            headers["x-vercel-protection-bypass"] = bypass
         target = f"https://{LEGACY_HOST}{asset_path}"
-        with opener.open(target, timeout=30) as response:
-            return response.read(), response.headers.get("Content-Type", "application/octet-stream")
+        req = urllib.request.Request(target, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return response.read(), response.headers.get("Content-Type", "application/octet-stream"), bool(bypass)
 
     def _json(self, payload, status=200):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -43,18 +41,16 @@ class handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _legacy(self, query, mode):
-        token = (query.get("token") or [""])[0]
         asset_path = (query.get("path") or ["/"])[0]
-        if not token or not asset_path.startswith("/"):
-            return self._json({"error": "missing token or invalid path"}, 400)
+        if not asset_path.startswith("/"):
+            return self._json({"error": "invalid path"}, 400)
         try:
-            opener = self._legacy_opener(token)
-            body, content_type = self._fetch_legacy(opener, asset_path)
+            body, content_type, bypass_available = self._fetch_legacy(asset_path)
 
             if mode == "legacy-meta":
                 text = body.decode("utf-8", errors="replace")
                 assets = sorted(set(re.findall(r'(?:src|href)=[\"\']([^\"\']+)[\"\']', text)))
-                return self._json({"path": asset_path, "length": len(body), "assets": assets})
+                return self._json({"path": asset_path, "length": len(body), "assets": assets, "bypass_available": bypass_available})
 
             if mode == "legacy-search":
                 needle = (query.get("needle") or [""])[0]
@@ -70,7 +66,7 @@ class handler(BaseHTTPRequestHandler):
                     lo, hi = max(0, pos - 450), min(len(text), pos + len(needle) + 450)
                     matches.append({"position": pos, "snippet": text[lo:hi]})
                     start = pos + max(1, len(needle))
-                return self._json({"path": asset_path, "length": len(body), "needle": needle, "matches": matches})
+                return self._json({"path": asset_path, "length": len(body), "needle": needle, "matches": matches, "bypass_available": bypass_available})
 
             if mode == "legacy-chunk":
                 offset = max(0, int((query.get("offset") or ["0"])[0]))
@@ -83,6 +79,7 @@ class handler(BaseHTTPRequestHandler):
                     "offset": offset,
                     "length": len(chunk),
                     "data_base64": base64.b64encode(chunk).decode("ascii"),
+                    "bypass_available": bypass_available,
                 })
 
             self.send_response(200)
@@ -91,7 +88,10 @@ class handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
         except Exception as exc:
-            return self._json({"error": f"{type(exc).__name__}: {exc}"}, 502)
+            return self._json({
+                "error": f"{type(exc).__name__}: {exc}",
+                "bypass_available": bool(os.getenv("VERCEL_AUTOMATION_BYPASS_SECRET")),
+            }, 502)
 
     def _health(self):
         results = []
@@ -103,4 +103,4 @@ class handler(BaseHTTPRequestHandler):
                     results.append({"url": url, "status": response.status, "body": body})
             except Exception as exc:
                 results.append({"url": url, "error": f"{type(exc).__name__}: {exc}"})
-        return self._json({"results": results})
+        return self._json({"results": results, "vercel_automation_bypass_available": bool(os.getenv("VERCEL_AUTOMATION_BYPASS_SECRET"))})
