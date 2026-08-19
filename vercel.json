@@ -1,10 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
-    "deploymentEnabled": false
+    "deploymentEnabled": true
   },
-  "installCommand": "echo legacy-static-restore",
-  "buildCommand": "mkdir -p dist && cp legacy/index.html dist/index.html",
+  "installCommand": "echo legacy-redirect",
+  "buildCommand": "mkdir -p dist && cp legacy/redirect.html dist/index.html",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
