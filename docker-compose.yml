@@ -41,6 +41,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # Existing operational database — unchanged.
       DATABASE_URL: postgresql://seo_user:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/seo
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY}
       ACCESS_TOKEN_EXPIRE_MINUTES: 30
@@ -49,6 +50,38 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:19006}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-localhost,127.0.0.1,testserver}
       ENABLE_HTTPS_REDIRECT: 'false'
+
+      # Isolated agent/SAF-T database (Neon). Leave empty until configured.
+      AI_DATABASE_URL: ${AI_DATABASE_URL:-}
+      AI_DATABASE_URL_NON_POOLING: ${AI_DATABASE_URL_NON_POOLING:-}
+      AI_AUTO_CREATE_SCHEMA: ${AI_AUTO_CREATE_SCHEMA:-false}
+      SAFT_INTEGRATION_ENABLED: ${SAFT_INTEGRATION_ENABLED:-false}
+
+      # Upstash Redis/KV.
+      REDIS_URL: ${REDIS_URL:-}
+      KV_URL: ${KV_URL:-}
+
+      # Upstash Vector/Search. Secrets stay server-side.
+      UPSTASH_VECTOR_REST_URL: ${UPSTASH_VECTOR_REST_URL:-}
+      UPSTASH_VECTOR_REST_TOKEN: ${UPSTASH_VECTOR_REST_TOKEN:-}
+      UPSTASH_SEARCH_REST_URL: ${UPSTASH_SEARCH_REST_URL:-}
+      UPSTASH_SEARCH_REST_TOKEN: ${UPSTASH_SEARCH_REST_TOKEN:-}
+
+      # QStash uses the custom Vercel prefix selected for this project.
+      upseo_QSTASH_URL: ${upseo_QSTASH_URL:-}
+      upseo_QSTASH_TOKEN: ${upseo_QSTASH_TOKEN:-}
+      upseo_QSTASH_CURRENT_SIGNING_KEY: ${upseo_QSTASH_CURRENT_SIGNING_KEY:-}
+      upseo_QSTASH_NEXT_SIGNING_KEY: ${upseo_QSTASH_NEXT_SIGNING_KEY:-}
+      upseo_QSTASH_SIGNING_KEY: ${upseo_QSTASH_SIGNING_KEY:-}
+
+      # Observability. Sentry is a no-op if no DSN is supplied.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      SENTRY_PROFILES_SAMPLE_RATE: ${SENTRY_PROFILES_SAMPLE_RATE:-0.0}
+      APP_RELEASE: ${APP_RELEASE:-}
+
+      # Checkly is external monitoring; the ID is optional at runtime.
+      CHECKLY_ACCOUNT_ID: ${CHECKLY_ACCOUNT_ID:-}
     ports:
       - '8000:8000'
     volumes:
