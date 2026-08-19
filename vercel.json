@@ -1,11 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
-    "deploymentEnabled": false
+    "deploymentEnabled": true
   },
-  "installCommand": "npm install --prefix frontend",
-  "buildCommand": "EXPO_PUBLIC_API_URL=https://sistemaeficienciaoperacional.duckdns.org/api/v1 npm run build --prefix frontend",
-  "outputDirectory": "frontend/dist",
+  "installCommand": "echo legacy-static-restore",
+  "buildCommand": "mkdir -p dist && cp legacy/index.html dist/index.html",
+  "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
     {
