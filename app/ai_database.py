@@ -71,15 +71,20 @@ def get_ai_db():
 
 
 def initialize_ai_schema() -> None:
-    """Create additive AI tables only when explicitly requested.
-
-    Production does not call this automatically unless AI_AUTO_CREATE_SCHEMA=true.
-    This prevents a deploy from mutating the Neon schema unexpectedly.
-    """
+    """Create additive AI tables in the isolated database only."""
 
     AIBase.metadata.create_all(bind=get_ai_engine())
 
 
 def maybe_initialize_ai_schema() -> None:
-    if os.getenv("AI_AUTO_CREATE_SCHEMA", "false").lower() == "true":
+    environment = os.getenv("ENVIRONMENT", "development")
+    default = "true" if environment in {"development", "test"} else "false"
+    if os.getenv("AI_AUTO_CREATE_SCHEMA", default).lower() == "true":
         initialize_ai_schema()
+
+
+def reset_ai_database_caches() -> None:
+    """Testing helper for environment-specific engine reconfiguration."""
+
+    _session_factory.cache_clear()
+    get_ai_engine.cache_clear()
