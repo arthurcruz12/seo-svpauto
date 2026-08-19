@@ -3,8 +3,8 @@
   "git": {
     "deploymentEnabled": true
   },
-  "installCommand": "echo legacy-cache-diagnostic",
-  "buildCommand": "python scripts/inspect-vercel-cache.py",
+  "installCommand": "echo protection-read-diagnostic",
+  "buildCommand": "vercel project protection seo-svpauto --format json; exit 1",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
