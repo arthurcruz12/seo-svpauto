@@ -4,7 +4,7 @@
     "deploymentEnabled": true
   },
   "installCommand": "echo legacy-cache-diagnostic",
-  "buildCommand": "echo '--- exact legacy assets in build filesystem ---' && find /vercel -type f \\( -name 'index-DifEdwF3.js' -o -name 'react-SLA1hOw8.js' -o -name 'icons-CNAm9td9.js' -o -name 'index-C6S3n_g7.css' -o -name 'charts-B-xu7Qo0.js' \\) -print 2>/dev/null && echo '--- likely cached JS/CSS files over 40KB ---' && find /vercel -type f \\( -name '*.js' -o -name '*.css' \\) -size +40k -print 2>/dev/null | head -100 && exit 1",
+  "buildCommand": "python scripts/inspect-vercel-cache.py",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
