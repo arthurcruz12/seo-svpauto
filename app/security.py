@@ -16,9 +16,28 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ROLE_PERMISSIONS = {
-    "admin": {"users:manage", "companies:write", "companies:read", "documents:write", "documents:read", "audit:read", "dashboard:read"},
-    "accountant": {"companies:write", "companies:read", "documents:write", "documents:read", "audit:read", "dashboard:read"},
-    "manager": {"companies:read", "documents:read", "dashboard:read"},
+    "admin": {
+        "users:manage",
+        "companies:write",
+        "companies:read",
+        "documents:write",
+        "documents:read",
+        "audit:read",
+        "dashboard:read",
+        "saft:read",
+        "saft:write",
+    },
+    "accountant": {
+        "companies:write",
+        "companies:read",
+        "documents:write",
+        "documents:read",
+        "audit:read",
+        "dashboard:read",
+        "saft:read",
+        "saft:write",
+    },
+    "manager": {"companies:read", "documents:read", "dashboard:read", "saft:read"},
     "employee": {"documents:write", "documents:read"},
 }
 

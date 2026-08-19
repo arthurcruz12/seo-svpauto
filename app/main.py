@@ -18,8 +18,11 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.database import Base, engine, get_db
 from app.models import AuditLog, Company, FinancialDocument, Tenant, User
 from app.neuro_ai import neuro_ai_engine
+from app.observability import init_sentry
 from app.schemas import CompanyCreate, CompanyRead, DocumentCreateResponse, FinancialDocumentCreate, RefreshTokenRequest, Token, TokenPair, UserCreate, UserLogin
 from app.security import create_access_token, create_refresh_token, decode_access_token, decode_refresh_token, get_password_hash, require_permission, verify_password
+
+init_sentry()
 
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 if ENVIRONMENT in {"development", "test"}:
