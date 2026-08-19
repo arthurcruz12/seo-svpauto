@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "npm install --prefix frontend",
+  "buildCommand": "EXPO_PUBLIC_API_URL=https://sistemaeficienciaoperacional.duckdns.org/api/v1 npm run build --prefix frontend",
+  "outputDirectory": "frontend/dist",
+  "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
