@@ -9,6 +9,30 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23081224'/%3E%3Cpath d='M15 21h18M15 32h14M15 43h18' stroke='%23fff' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M37 21h12M37 32h9M37 43h12' stroke='%23d8b76a' stroke-width='5' stroke-linecap='round'/%3E%3Cpath d='M47 19l6-3-2 7M42 36l11-11' stroke='%23d8b76a' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
     />
     <title>SEO - Sistema de Eficiência Operacional</title>
+    <script>
+      (() => {
+        const localBase = 'http://127.0.0.1:8000';
+        const proxyBase = '/seo-api';
+        const nativeFetch = window.fetch.bind(window);
+
+        const rewriteUrl = (value) => {
+          const url = String(value);
+          return url.startsWith(localBase)
+            ? `${proxyBase}${url.slice(localBase.length)}`
+            : url;
+        };
+
+        window.fetch = (input, init) => {
+          if (typeof input === 'string' || input instanceof URL) {
+            return nativeFetch(rewriteUrl(input), init);
+          }
+          if (input instanceof Request && input.url.startsWith(localBase)) {
+            return nativeFetch(new Request(rewriteUrl(input.url), input), init);
+          }
+          return nativeFetch(input, init);
+        };
+      })();
+    </script>
     <script type="module" crossorigin src="https://seo-svpauto-bsjdt0ajh-arthurcruz12s-projects.vercel.app/assets/index-DifEdwF3.js"></script>
     <link rel="modulepreload" crossorigin href="https://seo-svpauto-bsjdt0ajh-arthurcruz12s-projects.vercel.app/assets/react-SLA1hOw8.js">
     <link rel="modulepreload" crossorigin href="https://seo-svpauto-bsjdt0ajh-arthurcruz12s-projects.vercel.app/assets/icons-CNAm9td9.js">
