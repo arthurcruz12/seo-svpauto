@@ -1,15 +1,19 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
-    "deploymentEnabled": false
+    "deploymentEnabled": true
   },
-  "installCommand": "echo legacy-redirect",
-  "buildCommand": "mkdir -p dist && cp legacy/redirect.html dist/index.html",
+  "installCommand": "echo legacy-frontend",
+  "buildCommand": "mkdir -p dist && cp legacy/index.html dist/index.html",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
     {
-      "source": "/((?!api/).*)",
+      "source": "/seo-api/:path*",
+      "destination": "https://sistemaeficienciaoperacional.duckdns.org/:path*"
+    },
+    {
+      "source": "/((?!api/|seo-api/).*)",
       "destination": "/index.html"
     }
   ]
