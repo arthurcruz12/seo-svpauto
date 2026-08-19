@@ -1,5 +1,7 @@
+import base64
 import http.cookiejar
 import json
+import re
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler
@@ -15,39 +17,81 @@ LEGACY_HOST = "seo-svpauto-mayyrprie-arthurcruz12s-projects.vercel.app"
 class handler(BaseHTTPRequestHandler):
     def do_GET(self):
         query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-        if (query.get("mode") or [""])[0] == "legacy":
-            return self._legacy(query)
+        mode = (query.get("mode") or [""])[0]
+        if mode.startswith("legacy"):
+            return self._legacy(query, mode)
         return self._health()
 
-    def _legacy(self, query):
+    def _legacy_opener(self, token):
+        jar = http.cookiejar.CookieJar()
+        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+        auth_url = f"https://{LEGACY_HOST}/?_vercel_share={urllib.parse.quote(token)}"
+        opener.open(auth_url, timeout=15).read(128)
+        return opener
+
+    def _fetch_legacy(self, opener, asset_path):
+        target = f"https://{LEGACY_HOST}{asset_path}"
+        with opener.open(target, timeout=30) as response:
+            return response.read(), response.headers.get("Content-Type", "application/octet-stream")
+
+    def _json(self, payload, status=200):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _legacy(self, query, mode):
         token = (query.get("token") or [""])[0]
         asset_path = (query.get("path") or ["/"])[0]
         if not token or not asset_path.startswith("/"):
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b"missing token or invalid path")
-            return
-
-        jar = http.cookiejar.CookieJar()
-        opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+            return self._json({"error": "missing token or invalid path"}, 400)
         try:
-            auth_url = f"https://{LEGACY_HOST}/?_vercel_share={urllib.parse.quote(token)}"
-            opener.open(auth_url, timeout=15).read(64)
-            target = f"https://{LEGACY_HOST}{asset_path}"
-            with opener.open(target, timeout=20) as response:
-                body = response.read()
-                content_type = response.headers.get("Content-Type", "application/octet-stream")
+            opener = self._legacy_opener(token)
+            body, content_type = self._fetch_legacy(opener, asset_path)
+
+            if mode == "legacy-meta":
+                text = body.decode("utf-8", errors="replace")
+                assets = sorted(set(re.findall(r'(?:src|href)=[\"\']([^\"\']+)[\"\']', text)))
+                return self._json({"path": asset_path, "length": len(body), "assets": assets})
+
+            if mode == "legacy-search":
+                needle = (query.get("needle") or [""])[0]
+                if not needle:
+                    return self._json({"error": "missing needle"}, 400)
+                text = body.decode("utf-8", errors="replace")
+                matches = []
+                start = 0
+                while len(matches) < 20:
+                    pos = text.lower().find(needle.lower(), start)
+                    if pos < 0:
+                        break
+                    lo, hi = max(0, pos - 450), min(len(text), pos + len(needle) + 450)
+                    matches.append({"position": pos, "snippet": text[lo:hi]})
+                    start = pos + max(1, len(needle))
+                return self._json({"path": asset_path, "length": len(body), "needle": needle, "matches": matches})
+
+            if mode == "legacy-chunk":
+                offset = max(0, int((query.get("offset") or ["0"])[0]))
+                length = min(200000, max(1, int((query.get("length") or ["50000"])[0])))
+                chunk = body[offset:offset + length]
+                return self._json({
+                    "path": asset_path,
+                    "content_type": content_type,
+                    "total_length": len(body),
+                    "offset": offset,
+                    "length": len(chunk),
+                    "data_base64": base64.b64encode(chunk).decode("ascii"),
+                })
+
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
         except Exception as exc:
-            body = f"{type(exc).__name__}: {exc}".encode("utf-8")
-            self.send_response(502)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(body)
+            return self._json({"error": f"{type(exc).__name__}: {exc}"}, 502)
 
     def _health(self):
         results = []
@@ -59,10 +103,4 @@ class handler(BaseHTTPRequestHandler):
                     results.append({"url": url, "status": response.status, "body": body})
             except Exception as exc:
                 results.append({"url": url, "error": f"{type(exc).__name__}: {exc}"})
-
-        payload = json.dumps({"results": results}, ensure_ascii=False).encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(payload)
+        return self._json({"results": results})
