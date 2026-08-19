@@ -14,11 +14,14 @@ ASSETS = [
 
 jar = CookieJar()
 opener = build_opener(HTTPCookieProcessor(jar))
-headers = {"User-Agent": "seo-static-recovery/1.0"}
+headers = {"User-Agent": "Mozilla/5.0 seo-static-recovery/1.0"}
 
-# The temporary share URL establishes the Vercel access cookie for this build only.
 with opener.open(Request(SHARE_URL, headers=headers), timeout=30) as response:
-    response.read()
+    share_body = response.read()
+    print("share final url:", response.geturl())
+    print("share content type:", response.headers.get("Content-Type", ""))
+    print("share bytes:", len(share_body))
+print("cookies:", [(c.domain, c.name, c.value[:12] + "...") for c in jar])
 
 out = Path("dist/assets")
 out.mkdir(parents=True, exist_ok=True)
@@ -27,6 +30,9 @@ for asset_path in ASSETS:
     with opener.open(Request(HOST + asset_path, headers=headers), timeout=30) as response:
         data = response.read()
         content_type = response.headers.get("Content-Type", "")
+        final_url = response.geturl()
+    print(f"asset {asset_path}: {len(data)} bytes ({content_type}); final={final_url}")
+    print("asset prefix:", data[:80])
 
     if asset_path.endswith(".js") and "javascript" not in content_type:
         raise RuntimeError(f"Unexpected content type for {asset_path}: {content_type}")
