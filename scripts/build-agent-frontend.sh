@@ -35,6 +35,7 @@ cp -R "$SOURCE_DIR/src" "$WORK_DIR/src"
 
 python scripts/patch-agent-frontend.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-work-tasks-ui.py "$WORK_DIR/src/App.tsx"
+python scripts/patch-work-execution-ui.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-work-preview-bridge.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-agent-vercel-bridge.py "$WORK_DIR/src/App.tsx"
 
