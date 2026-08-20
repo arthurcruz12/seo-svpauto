@@ -54,7 +54,7 @@ def _headers(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _execute(token: str, *, company_id: int | None = None) -> dict:
+def _execute(token: str, *, company_id: int | None = None, content: bytes | None = None) -> dict:
     data = {"message": "Faça a faturação diária deste ficheiro."}
     if company_id is not None:
         data["company_id"] = str(company_id)
@@ -62,7 +62,7 @@ def _execute(token: str, *, company_id: int | None = None) -> dict:
         "/api/v1/assistant/messages",
         headers=_headers(token),
         data=data,
-        files={"file": ("billing.xlsx", _source_workbook(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        files={"file": ("billing.xlsx", content if content is not None else _source_workbook(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
     )
     assert response.status_code == 200
     return response.json()
@@ -79,7 +79,7 @@ def test_billing_task_persists_execution_and_artifact(monkeypatch, tmp_path):
     _, token = _register("assistant-persist")
     original = _source_workbook()
 
-    result = _execute(token)
+    result = _execute(token, content=original)
     assert result["status"] == "COMPLETED", result
     assert result["task_id"]
     assert result["artifacts"]
@@ -108,7 +108,6 @@ def test_billing_task_persists_execution_and_artifact(monkeypatch, tmp_path):
     assert download.status_code == 200
     assert download.content.startswith(b"PK")
 
-    # A new request and a new storage instance still resolve DB state + file.
     assert LocalPersistentStorage(root).exists(generated.storage_reference)
     repeated = client.get(f"/api/v1/assistant/tasks/{result['task_id']}", headers=_headers(token))
     repeated_download = client.get(output["download_url"], headers=_headers(token))
