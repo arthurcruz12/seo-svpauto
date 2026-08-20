@@ -114,8 +114,18 @@ class AgentTask(Base):
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
 
-    executions = relationship("AgentExecution", back_populates="task", cascade="all, delete-orphan")
-    artifacts = relationship("AgentArtifact", back_populates="task", cascade="all, delete-orphan")
+    executions = relationship(
+        "AgentExecution",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="AgentExecution.started_at",
+    )
+    artifacts = relationship(
+        "AgentArtifact",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="AgentArtifact.created_at",
+    )
 
 
 class AgentExecution(Base):
