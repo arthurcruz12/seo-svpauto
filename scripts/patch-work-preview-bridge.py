@@ -28,9 +28,11 @@ text = replace_once(
     text,
     '''  confidence?: number;
   errors?: string[];
+  executions?: AssistantAgentExecution[];
 };''',
     '''  confidence?: number;
   errors?: string[];
+  executions?: AssistantAgentExecution[];
   preview_bridge?: boolean;
   persistence?: string;
 };''',
@@ -125,6 +127,7 @@ required_markers = [
     'fetch("/api/assistant?op=tasks"',
     'fetch("/api/assistant?op=execute"',
     'inline_base64?: string;',
+    'executions?: AssistantAgentExecution[];',
     'Preview seguro:',
 ]
 for marker in required_markers:
