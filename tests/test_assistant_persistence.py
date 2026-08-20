@@ -66,7 +66,7 @@ def test_billing_task_persists_execution_and_artifact(monkeypatch, tmp_path):
     _, token = _register("assistant-persist")
 
     result = _execute(token)
-    assert result["status"] == "COMPLETED"
+    assert result["status"] == "COMPLETED", result
     assert result["task_id"]
     assert result["artifacts"]
     output = result["artifacts"][0]
@@ -84,7 +84,6 @@ def test_billing_task_persists_execution_and_artifact(monkeypatch, tmp_path):
     assert download.status_code == 200
     assert download.content.startswith(b"PK")
 
-    # A new request/storage instance must still resolve the DB task and file.
     repeated = client.get(f"/api/v1/assistant/tasks/{result['task_id']}", headers=_headers(token))
     repeated_download = client.get(output["download_url"], headers=_headers(token))
     assert repeated.status_code == 200
@@ -96,6 +95,7 @@ def test_tenant_cannot_read_or_download_another_tenants_task(monkeypatch, tmp_pa
     _, token_a = _register("assistant-tenant-a")
     _, token_b = _register("assistant-tenant-b")
     result = _execute(token_a)
+    assert result["status"] == "COMPLETED", result
     artifact = result["artifacts"][0]
 
     detail = client.get(f"/api/v1/assistant/tasks/{result['task_id']}", headers=_headers(token_b))
