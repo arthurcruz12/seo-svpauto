@@ -107,7 +107,6 @@ class RouteRequest(BaseModel):
 
 
 def _route(message: str, mode: str) -> dict:
-    text = message.casefold()
     normalized = _normalize(message)
     selected = ["manager"]
     reasons: list[str] = []
