@@ -44,8 +44,8 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 2
 fi
 
-if ! grep -Eq '^ENVIRONMENT=["'"']?production["'"']?$' .env.backend; then
-  echo "BLOCKED: .env.backend must set ENVIRONMENT=production." >&2
+if ! grep -Eq '^ENVIRONMENT=production[[:space:]]*$' .env.backend; then
+  echo "BLOCKED: .env.backend must set ENVIRONMENT=production without quotes." >&2
   exit 2
 fi
 
@@ -54,14 +54,11 @@ if ! grep -Eq '^SECRET_KEY=.+$' .env.backend; then
   exit 2
 fi
 
-DATABASE_VALUE="$(grep -E '^DATABASE_URL=' .env.backend | tail -n 1 | cut -d= -f2- | sed -e 's/^["'"']//; s/["'"']$//' || true)"
-case "$DATABASE_VALUE" in
-  postgresql://*|postgres://*) ;;
-  *)
-    echo "BLOCKED: Production DATABASE_URL must point to PostgreSQL." >&2
-    exit 2
-    ;;
-esac
+DATABASE_VALUE="$(grep -E '^DATABASE_URL=' .env.backend | tail -n 1 | cut -d= -f2- | tr -d '\r' || true)"
+if [[ "$DATABASE_VALUE" != postgresql://* && "$DATABASE_VALUE" != postgres://* ]]; then
+  echo "BLOCKED: Production DATABASE_URL must point to PostgreSQL and be unquoted." >&2
+  exit 2
+fi
 
 echo "Deploying backend commit: $(git rev-parse HEAD 2>/dev/null || echo unknown)"
 
