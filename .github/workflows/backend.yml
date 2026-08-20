@@ -28,6 +28,11 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -44,6 +49,10 @@ jobs:
       - name: Run tests with coverage
         run: |
           python -m pytest --cov=app --cov-report=term-missing --cov-fail-under=70 -q
+
+      - name: Build protected frontend
+        run: |
+          bash scripts/build-agent-frontend.sh
 
       - name: Build Docker image
         run: |
