@@ -25,8 +25,15 @@ def _source_workbook() -> bytes:
     sheet = workbook.active
     sheet.append(HEADERS)
     sheet.append(["1", "FR CUSA/1", "2026-08-20", "Cliente A", 123, 100, 23, "Liquidado", "", "", "Balcão", "1005 - VENDEDOR A", "MB"])
-    sheet.append(["2", "NC CNOV/1", "2026-08-20", "Cliente B", 12.3, 10, 2.3, "Pendente", "", "", "Site", "1005 - VENDEDOR A", "TB"])
-    sheet.append(["3", "FT PUSA/1", "2026-08-20", "SUCATAS DE RAMIL, S.A", 246, 200, 46, "Liquidado", "", "", "Balcão", "2004 - VENDEDOR C", "MB"])
+    sheet.append(["2", "FT CUSA/1", "2026-08-20", "Cliente B", 61.5, 50, 11.5, "Pendente", "", "", "Site", "1018 - VENDEDOR B", "TR"])
+    sheet.append(["3", "NC CNOV/1", "2026-08-20", "Cliente C", 12.3, 10, 2.3, "Liquidado", "", "", "Balcão", "1005 - VENDEDOR A", "NU"])
+    sheet.append(["4", "FR PUSA/1", "2026-08-20", "Cliente D", 246, 200, 46, "Liquidado", "", "", "Balcão", "2004 - VENDEDOR C", "MB"])
+    sheet.append(["5", "FT PNOV/1", "2026-08-20", "Cliente E", 123, 100, 23, "Pendente", "", "", "Balcão", "2019 - VENDEDOR D", "MB"])
+    sheet.append(["6", "NC PUSA/1", "2026-08-20", "Cliente F", 24.6, 20, 4.6, "Pendente", "", "", "Balcão", "2004 - VENDEDOR C", "TB"])
+    sheet.append(["7", "FR POFI/1", "2026-08-20", "Cliente Oficina", 61.5, 50, 11.5, "Liquidado", "", "", "Balcão", "2106 - OFICINA", "MB"])
+    sheet.append(["8", "FT PUSA/2", "2026-08-20", "SUCATAS DE RAMIL, S.A", 300, 300, 0, "Pendente", "", "", "Balcão", "2000 - SVP", "TB"])
+    sheet.append(["9", "GT CUSA/1", "2026-08-20", "Ignorar", 999, 999, 0, "Pendente", "", "", "Balcão", "1005 - VENDEDOR A", "TB"])
+    sheet.append(["10", "FR CUSA/2", "2026-08-20", "Anulado", 999, 999, 0, "Anulado", "", "", "Balcão", "1005 - VENDEDOR A", "TB"])
     buffer = BytesIO()
     workbook.save(buffer)
     return buffer.getvalue()
@@ -78,7 +85,7 @@ def test_billing_task_persists_execution_and_artifact(monkeypatch, tmp_path):
     assert [item["agent_name"] for item in payload["executions"]] == ["DocumentAgent", "BillingAgent", "AuditAgent"]
     assert all(item["status"] == "COMPLETED" for item in payload["executions"])
     assert payload["source_file"]["sha256"] != payload["output_files"][0]["sha256"]
-    assert payload["records_processed"] == 3
+    assert payload["records_processed"] == 8
 
     download = client.get(output["download_url"], headers=_headers(token))
     assert download.status_code == 200
