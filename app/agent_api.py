@@ -33,6 +33,10 @@ def _normalize(text: str) -> str:
     )
 
 
+def _snc_write_enabled() -> bool:
+    return _flag("AGENT_EXECUTION_ENABLED") and _flag("SNC_INTEGRATION_ENABLED") and _flag("SNC_WRITE_ENABLED")
+
+
 AGENTS = [
     {
         "id": "manager",
@@ -73,8 +77,8 @@ AGENTS = [
         "id": "snc",
         "name": "Agente SNC",
         "role": "specialist",
-        "capabilities": ["READ", "PREPARE", "VALIDATE", "WRITE"],
-        "write_access": _flag("AGENT_EXECUTION_ENABLED") and _flag("SNC_INTEGRATION_ENABLED"),
+        "capabilities": ["READ", "CLASSIFY", "PREPARE", "VALIDATE"],
+        "write_access": _snc_write_enabled(),
     },
     {
         "id": "audit",
@@ -137,9 +141,6 @@ def _route(message: str, mode: str) -> dict:
         selected.append("documents" if any(word in normalized for word in ("ficheiro", "arquivo", "excel", "pdf", "csv")) else "audit")
 
     selected = list(dict.fromkeys(selected))
-    # Imperatives and infinitives are deliberately matched by stems so requests
-    # such as "lance no SNC", "lançar no SNC" and "registe o lançamento" all
-    # enter the same human-approval path.
     write_stems = ("execut", "lanc", "grav", "alter", "apag", "elimin", "regist")
     explicit_write_phrases = ("write", "enviar para o snc", "envie para o snc")
     wants_write = any(stem in normalized for stem in write_stems) or any(
@@ -147,21 +148,23 @@ def _route(message: str, mode: str) -> dict:
     )
     approval_required = wants_write and any(agent in selected for agent in ("snc", "executor", "accounting"))
     execution_enabled = _flag("AGENT_EXECUTION_ENABLED")
+    snc_write = _snc_write_enabled()
 
     return {
         "agents": selected,
         "reasons": reasons or ["Roteamento geral pelo Agent Manager."],
         "approval_required": approval_required,
         "execution_enabled": execution_enabled,
-        "write_blocked": approval_required and not execution_enabled,
+        "write_blocked": approval_required and (not execution_enabled or ("snc" in selected and not snc_write)),
     }
 
 
 def _integration_catalog() -> list[dict]:
     infra = infrastructure_status()
+    snc_write = _snc_write_enabled()
     return [
         {"id": "atena", "name": "Atena", "category": "Sistemas empresariais", "configured": _configured("ATENA_API_URL", "ATENA_BASE_URL"), "status": "CONFIGURADO" if _configured("ATENA_API_URL", "ATENA_BASE_URL") else "NÃO CONFIGURADO", "permissions": ["READ"], "agents": ["manager", "billing", "documents"], "note": "Fonte confiável de informação; separado do SNC."},
-        {"id": "snc", "name": "SNC", "category": "Sistemas empresariais", "configured": _flag("SNC_INTEGRATION_ENABLED"), "status": "CONFIGURADO" if _flag("SNC_INTEGRATION_ENABLED") else "NÃO CONFIGURADO", "permissions": ["READ", "PREPARE", "VALIDATE"] + (["WRITE"] if _flag("AGENT_EXECUTION_ENABLED") else []), "agents": ["accounting", "snc", "audit", "executor"], "approval_required": True},
+        {"id": "snc", "name": "SNC", "category": "Sistemas empresariais", "configured": _flag("SNC_INTEGRATION_ENABLED"), "status": "CONFIGURADO" if _flag("SNC_INTEGRATION_ENABLED") else "NÃO CONFIGURADO", "permissions": ["READ", "CLASSIFY", "PREPARE", "VALIDATE"] + (["WRITE"] if snc_write else []), "agents": ["accounting", "snc", "audit", "executor"], "approval_required": True, "note": "WRITE permanece bloqueado enquanto SNC_WRITE_ENABLED=false, mesmo após aprovação humana."},
         {"id": "saft", "name": "SAF-T", "category": "Sistemas empresariais", "configured": _flag("SAFT_INTEGRATION_ENABLED"), "status": "CONFIGURADO" if _flag("SAFT_INTEGRATION_ENABLED") else "DESATIVADO", "permissions": ["READ", "STAGE", "VALIDATE"], "agents": ["saft", "documents", "audit"], "note": "Fonte externa imutável; sem escrita direta em documentos financeiros."},
         {"id": "neon", "name": "Neon", "category": "Infraestrutura", "configured": bool(infra.get("neon", {}).get("configured")), "status": "CONFIGURADO" if infra.get("neon", {}).get("configured") else "NÃO CONFIGURADO", "agents": ["manager", "saft"]},
         {"id": "redis", "name": "Upstash Redis", "category": "Infraestrutura", "configured": bool(infra.get("redis", {}).get("configured")), "status": "CONFIGURADO" if infra.get("redis", {}).get("configured") else "NÃO CONFIGURADO", "agents": ["manager"]},
@@ -179,14 +182,20 @@ def _integration_catalog() -> list[dict]:
 @router.get("/status")
 def agent_status(current_user: User = Depends(get_current_user)):
     require_permission(current_user, "dashboard:read")
+    artifact_path_configured = bool(os.getenv("SEO_ARTIFACT_STORAGE_PATH"))
     return {
         "enabled": _flag("AGENT_MANAGER_ENABLED", default=True),
-        "manager": "SEO Agent Manager",
+        "manager": "ready" if _flag("AGENT_MANAGER_ENABLED", default=True) else "disabled",
+        "billing_execution": _flag("AGENT_MANAGER_ENABLED", default=True),
         "execution_enabled": _flag("AGENT_EXECUTION_ENABLED"),
         "memory_enabled": _flag("AGENT_MEMORY_ENABLED"),
+        "task_storage": "database",
+        "artifact_storage": "persistent" if artifact_path_configured else "local_default",
         "snc_enabled": _flag("SNC_INTEGRATION_ENABLED"),
+        "snc_write": _snc_write_enabled(),
         "saft_enabled": _flag("SAFT_INTEGRATION_ENABLED"),
-        "write_policy": "human_approval_required",
+        "saft_ingestion": _flag("SAFT_INTEGRATION_ENABLED"),
+        "write_policy": "human_approval_plus_explicit_snc_write_gate",
         "assistant_tabs": ["Chat", "Trabalho", "Código", "Integrações"],
     }
 
@@ -227,5 +236,6 @@ def route_task(payload: RouteRequest, db: Session = Depends(get_db), current_use
             "authentication_preserved": True,
             "admin_credentials_unchanged": True,
             "human_approval_for_sensitive_writes": True,
+            "snc_write_enabled": _snc_write_enabled(),
         },
     }
