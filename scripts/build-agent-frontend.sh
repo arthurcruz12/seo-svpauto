@@ -4,25 +4,34 @@ set -euo pipefail
 # Rebuild the original Vite frontend from the exact immutable commit that
 # produced the preserved interface. We copy only frontend files; the current
 # FastAPI backend in app/ is never replaced by this process.
-SOURCE_REF="agent/substituir-sistema-operacional"
 SOURCE_SHA="20e92f6ecea51b8ae0afba88391ae03e53e68e93"
 WORK_DIR=".agent-web-source"
+ARCHIVE_DIR=".agent-web-archive"
+ARCHIVE_FILE="/tmp/seo-protected-frontend.tar.gz"
 
-rm -rf "$WORK_DIR" dist
-mkdir -p "$WORK_DIR"
+rm -rf "$WORK_DIR" "$ARCHIVE_DIR" dist
+mkdir -p "$WORK_DIR" "$ARCHIVE_DIR"
 
-git fetch --quiet --depth=1 origin "$SOURCE_REF"
-ACTUAL_SHA="$(git rev-parse FETCH_HEAD)"
-if [[ "$ACTUAL_SHA" != "$SOURCE_SHA" ]]; then
-  echo "Refusing to build: protected frontend source moved ($ACTUAL_SHA != $SOURCE_SHA)" >&2
+curl --fail --silent --show-error --location \
+  "https://codeload.github.com/arthurcruz12/seo-svpauto/tar.gz/${SOURCE_SHA}" \
+  --output "$ARCHIVE_FILE"
+
+tar -xzf "$ARCHIVE_FILE" -C "$ARCHIVE_DIR"
+SOURCE_DIR="$(find "$ARCHIVE_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+if [[ -z "$SOURCE_DIR" || ! -f "$SOURCE_DIR/src/App.tsx" ]]; then
+  echo "Protected frontend source archive is incomplete" >&2
   exit 1
 fi
 
-git archive FETCH_HEAD \
-  index.html package.json package-lock.json \
-  tsconfig.json tsconfig.node.json vite.config.ts \
-  tailwind.config.ts postcss.config.cjs src \
-  | tar -x -C "$WORK_DIR"
+cp "$SOURCE_DIR/index.html" "$WORK_DIR/index.html"
+cp "$SOURCE_DIR/package.json" "$WORK_DIR/package.json"
+cp "$SOURCE_DIR/package-lock.json" "$WORK_DIR/package-lock.json"
+cp "$SOURCE_DIR/tsconfig.json" "$WORK_DIR/tsconfig.json"
+cp "$SOURCE_DIR/tsconfig.node.json" "$WORK_DIR/tsconfig.node.json"
+cp "$SOURCE_DIR/vite.config.ts" "$WORK_DIR/vite.config.ts"
+cp "$SOURCE_DIR/tailwind.config.ts" "$WORK_DIR/tailwind.config.ts"
+cp "$SOURCE_DIR/postcss.config.cjs" "$WORK_DIR/postcss.config.cjs"
+cp -R "$SOURCE_DIR/src" "$WORK_DIR/src"
 
 python scripts/patch-agent-frontend.py "$WORK_DIR/src/App.tsx"
 
@@ -32,6 +41,6 @@ VITE_SEO_API_URL=/seo-api npm run build
 popd >/dev/null
 
 mv "$WORK_DIR/dist" dist
-rm -rf "$WORK_DIR"
+rm -rf "$WORK_DIR" "$ARCHIVE_DIR" "$ARCHIVE_FILE"
 
 echo "Agent-enabled frontend built from protected source $SOURCE_SHA"
