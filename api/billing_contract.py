@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler
 
-from app.billing_contract import BILLING_AGENT_CONTRACT, validate_billing_delivery
+from app.billing_contract import BILLING_AGENT_CONTRACT
 
 BACKEND_BASE = os.getenv("SEO_BACKEND_URL", "https://sistemaeficienciaoperacional.duckdns.org").rstrip("/")
 
@@ -56,30 +56,17 @@ class handler(BaseHTTPRequestHandler):
         return self._json({
             "mandatory": True,
             "contract": BILLING_AGENT_CONTRACT,
+            "validation_source": "server_side_audit_agent",
         })
 
     def do_POST(self):
         if not self._authorize():
             return
-        try:
-            length = min(int(self.headers.get("Content-Length", "0")), 20000)
-            payload = json.loads(self.rfile.read(length) or b"{}")
-        except Exception:
-            return self._json({"detail": "Invalid JSON payload"}, 400)
-
-        sheet_names = payload.get("sheet_names") or []
-        checks = payload.get("checks") or {}
-        if not isinstance(sheet_names, list) or not isinstance(checks, dict):
-            return self._json({"detail": "Invalid billing delivery manifest"}, 422)
-
-        result = validate_billing_delivery(sheet_names, checks)
-        http_status = 200 if result["valid"] else 422
-        return self._json({
-            **result,
-            "mandatory": True,
-            "message": (
-                "Faturação aprovada pelo contrato obrigatório."
-                if result["valid"]
-                else "Faturação rejeitada: a tarefa não pode ser marcada como concluída."
-            ),
-        }, http_status)
+        return self._json(
+            {
+                "status": "NEEDS_REVIEW",
+                "deprecated": True,
+                "detail": "Client-supplied audit booleans are not accepted. Execute billing through /api/v1/assistant/messages so AuditAgent inspects the generated workbook server-side.",
+            },
+            410,
+        )
