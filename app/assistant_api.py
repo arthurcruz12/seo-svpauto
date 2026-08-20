@@ -13,11 +13,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
 
-from app.agents.manager import AgentManager
+from app.agents.manager import AgentExecutionFailure, AgentManager
 from app.artifact_storage import ArtifactStorage, get_artifact_storage
 from app.database import get_db
 from app.main import get_current_user, write_audit_log
-from app.models import AgentArtifact, AgentExecution, AgentTask, User
+from app.models import AgentArtifact, AgentExecution, AgentTask, Company, User
 from app.security import require_permission
 
 router = APIRouter(prefix="/api/v1/assistant", tags=["assistant"])
@@ -85,6 +85,7 @@ def _task_payload(task: AgentTask, include_executions: bool = True) -> dict:
         "source_file": _artifact_payload(source) if source else None,
         "output_files": [_artifact_payload(artifact) for artifact in outputs],
         "errors": [task.error_message] if task.error_message else [],
+        "error_code": task.error_code,
         "audit": audit,
         "agents_used": [execution.agent_name for execution in task.executions],
         "records_processed": task.records_processed,
@@ -136,7 +137,10 @@ def _persist_artifact(
 
 
 def _persist_executions(db: Session, task_id: str, executions: list[dict]) -> None:
+    existing = {item.agent_name for item in db.query(AgentExecution).filter(AgentExecution.task_id == task_id).all()}
     for item in executions:
+        if item["agent_name"] in existing:
+            continue
         db.add(
             AgentExecution(
                 id=str(uuid4()),
@@ -155,6 +159,39 @@ def _persist_executions(db: Session, task_id: str, executions: list[dict]) -> No
 
 def _task_query(db: Session):
     return db.query(AgentTask).options(selectinload(AgentTask.executions), selectinload(AgentTask.artifacts))
+
+
+def _mark_failed(
+    *,
+    db: Session,
+    task_id: str,
+    tenant_id: int,
+    user_email: str,
+    filename: str,
+    exc: Exception,
+    executions: list[dict] | None = None,
+) -> AgentTask | None:
+    db.rollback()
+    task = db.query(AgentTask).filter(AgentTask.id == task_id, AgentTask.tenant_id == tenant_id).first()
+    if not task:
+        return None
+    if executions:
+        _persist_executions(db, task.id, executions)
+    task.status = "FAILED"
+    task.progress = 100
+    task.error_code = getattr(exc, "stage", None) or type(exc).__name__
+    task.error_message = str(exc)[:4000]
+    task.finished_at = _now()
+    write_audit_log(
+        db,
+        tenant_id,
+        "agent_billing_failed",
+        "agent_task",
+        None,
+        f"task_id={task.id}; user={user_email}; filename={filename}; error={str(exc)[:300]}",
+    )
+    db.commit()
+    return task
 
 
 @router.post("/messages")
@@ -194,6 +231,11 @@ async def assistant_messages(
             "errors": ["billing_source_file_required"],
         }
 
+    if company_id is not None:
+        company = db.query(Company).filter(Company.id == company_id, Company.tenant_id == current_user.tenant_id).first()
+        if not company:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
     filename = _safe_name(file.filename or "faturacao.xlsx")
     if not filename.lower().endswith((".xlsx", ".xlsm")):
         raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Billing source must be XLSX/XLSM")
@@ -223,13 +265,14 @@ async def assistant_messages(
     db.commit()
     db.refresh(task)
 
-    storage = get_artifact_storage()
     task.status = "RUNNING"
     task.progress = 5
     task.started_at = _now()
     db.commit()
 
+    manager_executions: list[dict] = []
     try:
+        storage = get_artifact_storage()
         source_digest = sha256(content).hexdigest()
         _persist_artifact(
             db=db,
@@ -246,7 +289,8 @@ async def assistant_messages(
         db.commit()
 
         result = MANAGER.execute_billing(content, filename, task_id=task.id)
-        _persist_executions(db, task.id, result.get("executions", []))
+        manager_executions = result.get("executions", [])
+        _persist_executions(db, task.id, manager_executions)
 
         audit_bytes = json.dumps(result["audit"], ensure_ascii=False, default=str, indent=2).encode("utf-8")
         _persist_artifact(
@@ -305,50 +349,53 @@ async def assistant_messages(
             "task_id": task.id,
             "status": result["status"],
             "agents_used": result["agents_used"],
+            "executions": manager_executions,
             "artifacts": [_artifact_payload(item) for item in artifacts],
             "audit": result["audit"],
             "approval_required": False,
             "confidence": result["confidence"],
             "errors": result["errors"],
         }
-    except Exception as exc:
-        db.rollback()
-        task = db.query(AgentTask).filter(AgentTask.id == task.id, AgentTask.tenant_id == current_user.tenant_id).first()
-        if task:
-            task.status = "FAILED"
-            task.progress = 100
-            task.error_code = type(exc).__name__
-            task.error_message = str(exc)[:4000]
-            task.finished_at = _now()
-            db.add(
-                AgentExecution(
-                    id=str(uuid4()),
-                    task_id=task.id,
-                    agent_name="DocumentAgent",
-                    status="FAILED",
-                    started_at=task.started_at or _now(),
-                    finished_at=_now(),
-                    input_summary=f"source={filename}; bytes={len(content)}",
-                    output_summary=None,
-                    confidence=0.0,
-                    error_message=str(exc)[:1000],
-                )
-            )
-            write_audit_log(
-                db,
-                current_user.tenant_id,
-                "agent_billing_failed",
-                "agent_task",
-                None,
-                f"task_id={task.id}; user={current_user.email}; filename={filename}; error={str(exc)[:300]}",
-            )
-            db.commit()
+    except AgentExecutionFailure as exc:
+        task = _mark_failed(
+            db=db,
+            task_id=task.id,
+            tenant_id=current_user.tenant_id,
+            user_email=current_user.email,
+            filename=filename,
+            exc=exc,
+            executions=exc.executions,
+        )
         return {
             "answer": "Não foi possível processar o Excel de faturação.",
             "conversation_id": None,
             "task_id": task.id if task else None,
             "status": "FAILED",
-            "agents_used": ["DocumentAgent"],
+            "agents_used": [item["agent_name"] for item in exc.executions],
+            "executions": exc.executions,
+            "artifacts": [],
+            "audit": None,
+            "approval_required": False,
+            "confidence": 0.0,
+            "errors": [str(exc)],
+        }
+    except Exception as exc:
+        task = _mark_failed(
+            db=db,
+            task_id=task.id,
+            tenant_id=current_user.tenant_id,
+            user_email=current_user.email,
+            filename=filename,
+            exc=exc,
+            executions=manager_executions,
+        )
+        return {
+            "answer": "Não foi possível processar o Excel de faturação.",
+            "conversation_id": None,
+            "task_id": task.id if task else None,
+            "status": "FAILED",
+            "agents_used": [item["agent_name"] for item in manager_executions],
+            "executions": manager_executions,
             "artifacts": [],
             "audit": None,
             "approval_required": False,
