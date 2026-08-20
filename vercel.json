@@ -1,10 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
-    "deploymentEnabled": false
+    "deploymentEnabled": true
   },
-  "installCommand": "echo legacy-frontend",
-  "buildCommand": "rm -rf dist && mkdir -p dist/assets && cp legacy/index.html dist/index.html && cp legacy/assets/* dist/assets/",
+  "installCommand": "echo protected-agent-frontend",
+  "buildCommand": "bash scripts/build-agent-frontend.sh",
   "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
