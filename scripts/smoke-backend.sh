@@ -35,6 +35,7 @@ wait_for_code() {
 
 wait_for_code "/health" "200"
 wait_for_code "/ready" "200"
+wait_for_code "/api/v1/assistant/ready" "200"
 wait_for_code "/api/v1/assistant/tasks" "401"
 
 printf 'Backend smoke gate passed for %s\n' "$BASE_URL"
