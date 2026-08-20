@@ -96,6 +96,24 @@ The deployment sequence is:
 
 If any command fails, the script exits non-zero and prints the latest backend container logs.
 
+## Assistant persistence readiness
+
+The new backend exposes a minimal, unauthenticated deployment-readiness endpoint:
+
+```text
+GET /api/v1/assistant/ready
+```
+
+It returns 200 only when all of the following are true:
+
+- `agent_tasks` is queryable;
+- `agent_executions` is queryable;
+- `agent_artifacts` is queryable;
+- `SEO_ARTIFACT_STORAGE_PATH` is explicitly configured;
+- the configured local artifact directory is writable.
+
+It does not return connection strings, filesystem paths, credentials or other secrets.
+
 ## Automated smoke gate
 
 `scripts/smoke-backend.sh` waits for and requires:
@@ -103,10 +121,11 @@ If any command fails, the script exits non-zero and prints the latest backend co
 ```text
 GET /health                          -> 200
 GET /ready                           -> 200
+GET /api/v1/assistant/ready          -> 200
 GET /api/v1/assistant/tasks          -> 401 without authentication
 ```
 
-The `401` requirement is deliberate: it proves the new Assistant route exists while remaining protected. A `404` means the new backend was not actually deployed.
+The Assistant readiness 200 proves the migration/storage layer is actually usable. The `401` on `/tasks` is deliberate: it proves the new Task route exists while remaining protected. A `404` means the new backend was not actually deployed.
 
 Default local target:
 
@@ -122,16 +141,17 @@ After the local smoke gate passes:
 
 1. `GET https://sistemaeficienciaoperacional.duckdns.org/health` returns 200.
 2. `GET https://sistemaeficienciaoperacional.duckdns.org/ready` returns 200.
-3. unauthenticated `GET /api/v1/assistant/tasks` returns 401, not 404.
-4. the same endpoint with a valid existing SEO JWT returns 200.
-5. execute one real billing XLSX through `POST /api/v1/assistant/messages`.
-6. confirm the Task reaches `COMPLETED` only after DocumentAgent, BillingAgent and AuditAgent complete.
-7. confirm an OUTPUT artifact exists and can be downloaded.
-8. restart/recreate the backend container.
-9. confirm the Task remains queryable.
-10. confirm the same OUTPUT remains downloadable after restart.
-11. confirm a JWT from another tenant receives 404 for the Task and artifact.
-12. confirm `/api/v1/agents/status` reports `snc_write=false` and `saft_ingestion=false`.
+3. `GET https://sistemaeficienciaoperacional.duckdns.org/api/v1/assistant/ready` returns 200.
+4. unauthenticated `GET /api/v1/assistant/tasks` returns 401, not 404.
+5. the same endpoint with a valid existing SEO JWT returns 200.
+6. execute one real billing XLSX through `POST /api/v1/assistant/messages`.
+7. confirm the Task reaches `COMPLETED` only after DocumentAgent, BillingAgent and AuditAgent complete.
+8. confirm an OUTPUT artifact exists and can be downloaded.
+9. restart/recreate the backend container.
+10. confirm the Task remains queryable.
+11. confirm the same OUTPUT remains downloadable after restart.
+12. confirm a JWT from another tenant receives 404 for the Task and artifact.
+13. confirm `/api/v1/agents/status` reports `snc_write=false` and `saft_ingestion=false`.
 
 Only after this live gate passes should the temporary Preview fallback be removed.
 
@@ -142,6 +162,7 @@ The PR CI additionally validates:
 - shell syntax for `deploy-backend.sh` and `smoke-backend.sh`;
 - deploy helper remains dry-run by default;
 - `docker-compose.backend.yml` parses with a safe temporary Production-shaped environment;
+- Assistant persistence readiness tests;
 - Alembic migrations;
 - backend tests/coverage;
 - protected frontend build;
