@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import unicodedata
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends
@@ -22,6 +23,14 @@ def _flag(name: str, default: bool = False) -> bool:
 
 def _configured(*names: str) -> bool:
     return any(bool(os.getenv(name)) for name in names)
+
+
+def _normalize(text: str) -> str:
+    return "".join(
+        char
+        for char in unicodedata.normalize("NFKD", text.casefold())
+        if not unicodedata.combining(char)
+    )
 
 
 AGENTS = [
@@ -99,37 +108,44 @@ class RouteRequest(BaseModel):
 
 def _route(message: str, mode: str) -> dict:
     text = message.casefold()
+    normalized = _normalize(message)
     selected = ["manager"]
     reasons: list[str] = []
 
-    if mode == "code" or any(word in text for word in ("código", "codigo", "github", "codex", "bug", "erro de build", "deploy", "vercel", "teste")):
+    if mode == "code" or any(word in normalized for word in ("codigo", "github", "codex", "bug", "erro de build", "deploy", "vercel", "teste")):
         selected.append("code")
         reasons.append("Tarefa técnica ou de engenharia de software.")
 
-    if any(word in text for word in ("saft", "saf-t", "xml")):
+    if any(word in normalized for word in ("saft", "saf-t", "xml")):
         selected.extend(["saft", "documents", "audit"])
         reasons.append("Pedido relacionado com SAF-T/documentos requer staging e validação.")
 
-    if any(word in text for word in ("faturação", "faturacao", "fatura", "fr ", "ft ", "nota de crédito", "nota de credito", "nc ", "coimbra", "picoto", "sucata", "salvado", "vendedor", "mapa diário", "mapa diario")):
+    if any(word in normalized for word in ("faturacao", "fatura", "fr ", "ft ", "nota de credito", "nc ", "coimbra", "picoto", "sucata", "salvado", "vendedor", "mapa diario")):
         selected.extend(["billing", "documents", "audit"])
         reasons.append("Pedido de faturação ou mapa operacional.")
 
-    accounting_terms = ("snc", "contabil", "contábil", "débito", "debito", "crédito", "credito", "iva", "lançamento", "lancamento")
-    if any(word in text for word in accounting_terms):
+    accounting_terms = ("snc", "contabil", "debito", "credito", "iva", "lancamento")
+    if any(word in normalized for word in accounting_terms):
         selected.extend(["accounting", "audit"])
         reasons.append("Pedido contabilístico requer preparação e auditoria.")
-        if "snc" in text or "lançamento" in text or "lancamento" in text:
+        if "snc" in normalized or "lancamento" in normalized:
             selected.append("snc")
 
-    if mode == "integrations" or any(word in text for word in ("integração", "integracao", "api", "mcp", "atena", "neon", "upstash", "qstash", "sentry", "checkly")):
+    if mode == "integrations" or any(word in normalized for word in ("integracao", "api", "mcp", "atena", "neon", "upstash", "qstash", "sentry", "checkly")):
         reasons.append("Pedido relacionado com integrações e ferramentas externas.")
 
     if len(selected) == 1:
-        selected.append("documents" if any(word in text for word in ("ficheiro", "arquivo", "excel", "pdf", "csv")) else "audit")
+        selected.append("documents" if any(word in normalized for word in ("ficheiro", "arquivo", "excel", "pdf", "csv")) else "audit")
 
     selected = list(dict.fromkeys(selected))
-    write_terms = ("executar", "lançar", "lancar", "gravar", "alterar", "apagar", "eliminar", "write", "enviar para o snc")
-    wants_write = any(word in text for word in write_terms)
+    # Imperatives and infinitives are deliberately matched by stems so requests
+    # such as "lance no SNC", "lançar no SNC" and "registe o lançamento" all
+    # enter the same human-approval path.
+    write_stems = ("execut", "lanc", "grav", "alter", "apag", "elimin", "regist")
+    explicit_write_phrases = ("write", "enviar para o snc", "envie para o snc")
+    wants_write = any(stem in normalized for stem in write_stems) or any(
+        phrase in normalized for phrase in explicit_write_phrases
+    )
     approval_required = wants_write and any(agent in selected for agent in ("snc", "executor", "accounting"))
     execution_enabled = _flag("AGENT_EXECUTION_ENABLED")
 
