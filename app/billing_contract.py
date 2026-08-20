@@ -55,7 +55,7 @@ BILLING_AGENT_CONTRACT = {
     "mapa_diario": {
         "locations": ["Coimbra", "Picoto"],
         "vehicle_groups": ["Usado", "Novo"],
-        "poﬁ_separate": True,
+        "pofi_separate": True,
         "columns": [
             "FR c/ IVA",
             "FR s/ IVA",
@@ -102,9 +102,8 @@ def validate_billing_delivery(
 ) -> dict:
     """Validate whether a billing task is allowed to finish as COMPLETED.
 
-    This validator is intentionally independent from Excel parsing. The workbook
-    generator/auditor must report its checks here; missing sheets or failed
-    checks force the task to FAILED.
+    The workbook generator/auditor reports its checks here. Missing required
+    sheets or any failed/missing audit check force the task to FAILED.
     """
 
     actual = {str(name).strip() for name in sheet_names}
