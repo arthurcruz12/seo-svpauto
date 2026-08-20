@@ -38,6 +38,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Validate deployment scripts
+        run: |
+          bash -n scripts/deploy-backend.sh
+          bash -n scripts/smoke-backend.sh
+          bash scripts/deploy-backend.sh | tee /tmp/deploy-dry-run.txt
+          grep -q "DRY RUN ONLY" /tmp/deploy-dry-run.txt
+          cat > .env.backend <<'EOF'
+          ENVIRONMENT=production
+          DATABASE_URL=postgresql://ci:ci@db.example.invalid:5432/seo
+          SECRET_KEY=ci-only-not-a-real-secret
+          CORS_ORIGINS=*
+          ALLOWED_HOSTS=*
+          EOF
+          docker compose -f docker-compose.backend.yml config -q
+          rm -f .env.backend
+
       - name: Lint backend
         run: |
           ruff check app tests
