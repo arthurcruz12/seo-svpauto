@@ -5,78 +5,78 @@ Branch: `feature/agent-manager-assistant-integration`
 
 ## Purpose
 
-This file records the architecture actually observed in the repository and deployment configuration before further agent implementation. It is descriptive, not a migration plan.
+This file records the architecture currently implemented on the agent integration branch. It is descriptive of branch state and does not authorize merge to `main` or Production deployment.
 
 ## 1. Protected public frontend
 
-The public SEO interface is not served from `frontend/App.js`.
-
-The Vercel build on `main` serves the preserved frontend under `legacy/`. The agent branch rebuilds the original Vite source from the immutable commit `20e92f6ecea51b8ae0afba88391ae03e53e68e93` and applies narrowly scoped patches only inside the existing Assistant IA.
+The public SEO interface is preserved from the immutable frontend source commit `20e92f6ecea51b8ae0afba88391ae03e53e68e93`. The branch rebuilds that frontend and applies narrowly scoped patches only inside the existing Assistente IA.
 
 Protected flow:
 
-`Homepage pública -> Entrar -> Login existente -> autenticação existente -> SEO interno -> Assistente IA`
+`Homepage pública -> Entrar -> Login existente -> MFA/autenticação existente -> SEO interno -> Assistente IA`
 
-Protected areas that must not be replaced by agent work:
+Protected areas that agent work must not replace or redesign:
 
-- public homepage and navigation;
-- Entrar button;
-- login form;
-- MFA flow;
-- registration flow;
+- homepage and public navigation;
+- Entrar/login forms;
+- MFA and registration;
 - administrator identity/credentials;
-- existing authenticated shell.
+- authenticated shell.
 
-The agent-enabled Assistant IA order is:
+Assistente IA order remains:
 
 `Chat | Trabalho | Código | Integrações`
 
-## 2. Vercel routing
+`Trabalho` now has its own task-execution interface and does not replace the existing Chat flow.
 
-Vercel serves the frontend and provides small authenticated bridge endpoints under `/api/*` for agent-related capabilities.
+## 2. Vercel routing and Preview compatibility
 
-Requests under `/seo-api/:path*` are rewritten to the external backend:
+Vercel serves the protected frontend. Requests under `/seo-api/:path*` are rewritten to:
 
 `https://sistemaeficienciaoperacional.duckdns.org/:path*`
 
-All other frontend paths fall back to `/index.html`.
+The Trabalho UI first calls the persistent backend endpoints under `/api/v1/assistant/*` through that rewrite.
 
-Production and preview must remain separate. Changes in this branch must not be promoted to Production automatically.
+Because the currently deployed DuckDNS backend has not yet been updated with this branch, Preview retains a temporary `/api/assistant` execution fallback. That fallback is a compatibility layer only and is blocked in Production. It must be removed only after the persistent DuckDNS backend passes the rollout/restart gate.
 
-## 3. Backend repository structure
+No branch change is promoted to Production automatically.
 
-The canonical Python application code is under:
+## 3. Backend application
 
-`app/`
-
-Core application:
+Canonical core application:
 
 `app.main:app`
 
-Agent/SAF-T additive entrypoint used by the container:
+Additive container entrypoint:
 
 `app.main_saft:app`
 
-`app.main_saft` imports the existing `app.main:app` and adds isolated routers. It must not replace authentication, users, tenants, companies, roles or existing financial data.
+`app.main_saft` imports the existing core app and adds:
 
-## 4. Authentication and tenancy
+- agent router;
+- assistant execution router;
+- isolated SAF-T router.
 
-Existing authentication is JWT-based and resolves the current user from the existing `users` table.
+Authentication, tenants, users, companies and existing financial models are reused rather than replaced.
 
-Relevant identity context:
+## 4. Authentication, RBAC and tenancy
+
+The backend uses the existing JWT authentication and existing `users` table.
+
+All Assistant execution endpoints reuse:
 
 - `current_user`;
 - `tenant_id`;
-- user role / RBAC permissions;
-- company ownership scoped to the current tenant.
+- existing RBAC permissions;
+- existing company ownership.
 
-New agent endpoints must reuse this identity. No parallel authentication provider is allowed for the MVP.
+`company_id`, task detail and artifact download are tenant-scoped. A different tenant receives 404 rather than visibility into another tenant's resources.
 
-## 5. Operational database
+## 5. Persistent task database
 
-The existing operational database is configured through `DATABASE_URL`.
+`DATABASE_URL` remains the operational database source.
 
-Current operational models include:
+Existing core models remain intact:
 
 - Tenant;
 - User;
@@ -84,71 +84,158 @@ Current operational models include:
 - FinancialDocument;
 - AuditLog.
 
-Schema changes for agent tasks, stored artifacts and richer execution metadata must be additive only.
+Additive migration `0003_agent_task_persistence` creates:
 
-## 6. AI / SAF-T isolated infrastructure
+### AgentTask
 
-The repository contains a separate AI/SAF-T infrastructure path configured through `AI_DATABASE_URL` / `AI_DATABASE_URL_NON_POOLING` when available.
+Persistent task lifecycle and metadata, including:
 
-SAF-T is not part of the MVP execution input yet.
+- tenant/user/company scope;
+- agent/task type;
+- PENDING/RUNNING/NEEDS_REVIEW/COMPLETED/FAILED/CANCELLED-compatible status field;
+- progress;
+- instruction/source filename;
+- processed/rejected counts;
+- confidence/approval;
+- audit JSON;
+- error code/message;
+- timestamps.
 
-Required state for this phase:
+### AgentExecution
 
-- `SAFT_INTEGRATION_ENABLED=false`;
-- no real company SAF-T ingestion;
-- no direct write from SAF-T into official financial documents.
+One trace per participating agent with:
 
-## 7. SNC
+- agent name;
+- status;
+- start/finish timestamps;
+- input/output summary;
+- confidence;
+- error.
 
-SNC is distinct from Atena and from SAF-T.
+Current billing execution records:
 
-For the current phase SNC is preparation-only:
+`DocumentAgent -> BillingAgent -> AuditAgent`
 
-`READ | CLASSIFY | PREPARE | VALIDATE`
+### AgentArtifact
 
-Direct SNC write must remain disabled. Human approval records a decision but does not execute an SNC posting in this phase.
+Persistent artifact metadata with:
 
-A dedicated `SNC_WRITE_ENABLED=false` guard must be treated as mandatory before any future adapter can expose write behavior.
+- task/tenant/user scope;
+- filename/content type/size;
+- SHA-256;
+- SOURCE / OUTPUT / AUDIT_REPORT role;
+- storage provider/reference;
+- creation time.
 
-## 8. Atena
+The API never exposes `storage_reference`.
 
-Atena is a trusted information source. It is not the SNC and must not be represented as the SNC.
+## 6. Artifact storage
 
-The SEO may use Atena data for treatment, reconciliation, organization, analysis and decision support when a real integration is configured. No simulated Atena connection is considered functional.
+Agents no longer depend directly on a task JSON folder.
 
-## 9. Current Agent Manager state before this implementation
+`ArtifactStorage` is the storage interface with:
 
-The existing agent layer performs authenticated intent routing and can show the selected agents, integration status and approval requirement.
+- `save()`;
+- `open()`;
+- `exists()`;
+- `delete()`.
 
-It does not yet constitute successful business execution merely by returning agent names.
+Current provider:
 
-The target billing execution is:
+`LocalPersistentStorage`
 
-`message -> task -> DocumentAgent -> BillingAgent -> AuditAgent -> XLSX artifact -> persisted task/audit -> response`
+Configuration:
 
-`COMPLETED` is valid only when the real output artifact exists and the autonomous auditor passes all mandatory checks.
+`SEO_ARTIFACT_STORAGE_PROVIDER=local`
 
-## 10. Billing source contract observed
+`SEO_ARTIFACT_STORAGE_PATH=/var/lib/seo/agent-storage`
 
-Raw daily billing workbooks use header names rather than fixed column indexes. The supported canonical fields are:
+The supplied backend Compose configuration mounts a persistent Docker named volume at that path. Storage references are opaque relative references and path traversal outside the configured root is rejected.
 
-- ID;
-- Documento;
-- Data Doc.;
-- Entidade;
-- Total;
-- Total liquido / Total líquido;
-- Total IVA;
-- Estado;
-- Doc. Fornecedor;
-- Nº Enc. / Req. Ext.;
-- Canal de Anúncios;
-- Vendedor;
-- F. Liquidação / Forma de Liquidação.
+The abstraction permits future S3/R2/Blob/MinIO providers without changing DocumentAgent/BillingAgent/AuditAgent.
 
-Document type and series can be derived from `Documento` when not supplied explicitly, e.g. `FR CUSA/667`.
+## 7. Original/output integrity
 
-Supported series:
+Original uploads and generated results are different artifacts and different storage references.
+
+Each has an independent SHA-256.
+
+The source upload is preserved byte-for-byte and is never overwritten by the BillingAgent output.
+
+Only an OUTPUT artifact can be downloaded through the public Assistant artifact endpoint.
+
+## 8. Agent Manager execution lifecycle
+
+The executable billing path is:
+
+`POST /api/v1/assistant/messages`
+
+`-> AgentTask PENDING`
+
+`-> RUNNING`
+
+`-> SOURCE artifact persisted`
+
+`-> DocumentAgent`
+
+`-> BillingAgent`
+
+`-> AuditAgent`
+
+`-> AUDIT_REPORT persisted`
+
+`-> OUTPUT persisted only if audit passes`
+
+`-> AgentTask COMPLETED or FAILED`
+
+Routing alone is never completion.
+
+`COMPLETED` requires a real generated workbook and a passing autonomous AuditAgent result.
+
+If a stage raises, partial AgentExecution traces are preserved with the actual failing agent.
+
+## 9. Assistant API
+
+Persistent endpoints:
+
+- `POST /api/v1/assistant/messages`
+- `GET /api/v1/assistant/tasks`
+- `GET /api/v1/assistant/tasks/{task_id}`
+- `GET /api/v1/assistant/artifacts/{file_id}`
+
+Task listing supports:
+
+- `limit` (1–100);
+- `offset`;
+- `status`;
+- `agent_type`;
+- `date_from`;
+- `date_to`.
+
+Default ordering is newest task first.
+
+All endpoints use existing authentication/RBAC and tenant isolation.
+
+## 10. Trabalho interface
+
+`Assistente IA -> Trabalho` supports:
+
+- XLSX/XLSM source selection;
+- execution instruction;
+- execution through Agent Manager;
+- status/result card;
+- DocumentAgent/BillingAgent/AuditAgent status display;
+- autonomous audit detail;
+- OUTPUT download;
+- persisted task history from `/tasks`.
+
+The existing Chat interface remains separate.
+
+## 11. Billing contract
+
+Raw workbooks are located by header names rather than hard-coded column positions.
+
+Supported billing series:
 
 - Coimbra: CUSA, CNOV;
 - Picoto: PUSA, PNOV, POFI.
@@ -159,61 +246,117 @@ Supported billing documents:
 - FT;
 - NC.
 
-NC monetary values are normalized to `-ABS(value)` and are separated by `Liquidado` / `Pendente`.
+GT/PF and cancelled documents are excluded. NC values are normalized negative and separated by Liquidado/Pendente. Seller summary uses `Total líquido`. Sucatas and Salvados remain separate and Salvado is never invented without an explicit marker.
 
-Sucatas and Salvados must be separate. A Sucata is only classified when there is an explicit marker (currently a known operational marker is an entity containing `SUCATAS DE RAMIL`). Salvados must not be invented when no explicit marker exists.
+Required workbook output remains exactly:
 
-## 11. Storage
+1. `Faturação Separada`
+2. `Resumo Vendedores`
+3. `Mapa Diário`
 
-The original source file must never be overwritten.
+The legacy serverless billing contract POST no longer accepts client-declared audit booleans. Server-side AuditAgent inspection is authoritative.
 
-Agent execution must retain metadata including:
+## 12. Autonomous audit
 
-- file id;
-- tenant/company/user scope;
-- filename;
-- content type;
-- size;
-- SHA-256;
-- source/output role;
-- storage reference;
-- creation time.
+AuditAgent opens the generated workbook itself and validates the output against normalized source records.
 
-The storage backend may be configurable, but the API contract must not expose filesystem paths, secrets or connection strings to the client.
+The negative corruption test remains mandatory: after deliberate workbook value modification the auditor must return FAILED.
 
-## 12. Jobs
+A FAILED audit does not create/expose an OUTPUT artifact.
 
-`app/tasks.py` currently contains a Celery placeholder returning `processed_async`. It is legacy behavior and must not be treated as a real job implementation.
+## 13. SNC safety
 
-A future asynchronous architecture must use one real job mechanism and perform real work. Until then, the billing MVP may execute synchronously while persisting task state transitions.
+SNC is distinct from Atena and SAF-T.
 
-## 13. CI and validation
+Current SNC capability remains:
 
-Existing Backend CI covers Python lint, Alembic migrations, pytest/coverage and Docker build.
+`READ | CLASSIFY | PREPARE | VALIDATE`
 
-The complete MVP gate additionally requires:
+SNC write requires all three flags to be true:
 
-- frontend protected-marker regression checks;
-- frontend typecheck/build;
-- billing workbook integration tests;
-- negative auditor test with a deliberately corrupted workbook;
-- authentication/tenant tests;
-- E2E homepage/login/Assistant tests;
-- visual regression check;
-- Vercel Preview validation.
+- `AGENT_EXECUTION_ENABLED`;
+- `SNC_INTEGRATION_ENABLED`;
+- `SNC_WRITE_ENABLED`.
 
-## 14. Canonical safety rules
+For this phase the deployment configuration pins:
 
-No implementation in this branch may:
+`SNC_WRITE_ENABLED=false`
 
-- remove or replace the homepage;
-- replace login/authentication;
+Human approval alone cannot bypass that gate.
+
+## 14. SAF-T safety
+
+SAF-T real ingestion remains disabled for this phase:
+
+`SAFT_INTEGRATION_ENABLED=false`
+
+No SAF-T path is allowed to write directly into official financial documents in this phase.
+
+## 15. Atena
+
+Atena remains a distinct trusted information source. SEO may consume Atena data for treatment, reconciliation, organization, analysis and decision support when a real integration is configured. SEO does not replace or “correct” Atena and Atena must not be represented as SNC.
+
+## 16. Legacy fake completion paths
+
+The legacy Celery placeholder no longer claims `processed_async` success.
+
+Fake DocumentAI values were removed.
+
+Client-provided `checks=true` style billing audit assertions are deprecated and cannot mark a task complete.
+
+## 17. Backend rollout preparation
+
+`docker-compose.backend.yml` defines the persistent backend runtime and artifact volume.
+
+`scripts/deploy-backend.sh` is dry-run by default. An actual server deployment requires both explicit `--apply` and `SEO_ALLOW_BACKEND_DEPLOY=true`, plus the server-side `.env.backend`.
+
+`BACKEND_PERSISTENCE_DEPLOY.md` documents the migration, deployment and rollback procedure.
+
+This branch preparation does **not** constitute a Production deployment.
+
+## 18. Required live rollout gate
+
+After a separately authorized DuckDNS backend deployment, verify:
+
+1. `/health` = 200;
+2. `/ready` = 200;
+3. unauthenticated `/api/v1/assistant/tasks` = 401, not 404;
+4. authenticated `/api/v1/assistant/tasks` = 200;
+5. real billing upload reaches COMPLETED only after audit passes;
+6. task and artifact survive backend/container restart;
+7. same OUTPUT remains downloadable after restart;
+8. another tenant gets 404 for task/artifact;
+9. `snc_write=false`;
+10. `saft_ingestion=false`.
+
+Only after this live gate passes should the temporary Preview fallback be removed.
+
+## 19. CI gate
+
+The branch CI validates:
+
+- Ruff;
+- Alembic migrations;
+- pytest + coverage;
+- billing integration tests;
+- negative auditor test;
+- persistent task/artifact tests;
+- tenant isolation;
+- protected frontend marker tests;
+- TypeScript/Vite protected frontend build;
+- Docker build.
+
+## 20. Canonical safety rules
+
+This branch must not:
+
+- replace homepage/login/MFA/authentication;
 - change administrator credentials;
-- perform destructive schema migration;
-- overwrite originals;
-- push or merge directly to `main`;
-- promote a deployment to Production;
-- enable SAF-T real ingestion;
-- execute an SNC posting.
+- destructively migrate existing data;
+- overwrite source uploads;
+- merge directly to `main`;
+- promote to Production;
+- enable real SAF-T ingestion;
+- execute SNC write while the explicit gate is false.
 
-If any requested change would require one of those actions, that part is `BLOCKED_BY_SAFETY` while safe work continues.
+If a requested step requires Production deployment or another permission outside the current branch authorization, that step remains blocked while branch-safe implementation and validation continue.
