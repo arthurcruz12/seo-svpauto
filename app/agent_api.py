@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.artifact_storage import get_artifact_storage
 from app.database import get_db
 from app.integrations import infrastructure_status
 from app.main import get_current_user, write_audit_log
-from app.models import User
+from app.models import AgentTask, User
 from app.security import require_permission
 
 router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
@@ -179,18 +180,40 @@ def _integration_catalog() -> list[dict]:
     ]
 
 
-@router.get("/status")
-def agent_status(current_user: User = Depends(get_current_user)):
-    require_permission(current_user, "dashboard:read")
+def _persistence_readiness(db: Session) -> tuple[bool, bool, str]:
+    try:
+        db.query(AgentTask.id).limit(1).all()
+        task_storage_ready = True
+    except Exception:
+        db.rollback()
+        task_storage_ready = False
+
     artifact_path_configured = bool(os.getenv("SEO_ARTIFACT_STORAGE_PATH"))
+    try:
+        storage = get_artifact_storage()
+        artifact_storage_ready = artifact_path_configured and storage.provider == "local"
+        artifact_status = "persistent" if artifact_storage_ready else "local_default"
+    except Exception:
+        artifact_storage_ready = False
+        artifact_status = "unavailable"
+    return task_storage_ready, artifact_storage_ready, artifact_status
+
+
+@router.get("/status")
+def agent_status(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    require_permission(current_user, "dashboard:read")
+    manager_enabled = _flag("AGENT_MANAGER_ENABLED", default=True)
+    task_storage_ready, artifact_storage_ready, artifact_status = _persistence_readiness(db)
+    billing_ready = manager_enabled and task_storage_ready and artifact_storage_ready
     return {
-        "enabled": _flag("AGENT_MANAGER_ENABLED", default=True),
-        "manager": "ready" if _flag("AGENT_MANAGER_ENABLED", default=True) else "disabled",
-        "billing_execution": _flag("AGENT_MANAGER_ENABLED", default=True),
+        "enabled": manager_enabled,
+        "manager": "ready" if manager_enabled else "disabled",
+        "billing_execution": billing_ready,
         "execution_enabled": _flag("AGENT_EXECUTION_ENABLED"),
         "memory_enabled": _flag("AGENT_MEMORY_ENABLED"),
-        "task_storage": "database",
-        "artifact_storage": "persistent" if artifact_path_configured else "local_default",
+        "task_storage": "persistent" if task_storage_ready else "unavailable",
+        "task_storage_provider": "database",
+        "artifact_storage": artifact_status,
         "snc_enabled": _flag("SNC_INTEGRATION_ENABLED"),
         "snc_write": _snc_write_enabled(),
         "saft_enabled": _flag("SAFT_INTEGRATION_ENABLED"),
