@@ -38,6 +38,7 @@ python scripts/patch-work-tasks-ui.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-work-execution-ui.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-work-preview-bridge.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-work-cloud-sync.py "$WORK_DIR/src/App.tsx"
+python scripts/patch-work-traceability-ui.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-agent-vercel-bridge.py "$WORK_DIR/src/App.tsx"
 
 pushd "$WORK_DIR" >/dev/null
