@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -88,3 +88,77 @@ class AuditLog(Base):
     entity_id = Column(Integer, nullable=True)
     details = Column(String, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class AgentTask(Base):
+    __tablename__ = "agent_tasks"
+
+    id = Column(String(36), primary_key=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
+    agent_type = Column(String(50), nullable=False, default="manager", index=True)
+    task_type = Column(String(50), nullable=False, index=True)
+    status = Column(String(24), nullable=False, default="PENDING", index=True)
+    progress = Column(Integer, nullable=False, default=0)
+    instruction = Column(Text, nullable=False)
+    source_filename = Column(String(255), nullable=True)
+    records_processed = Column(Integer, nullable=False, default=0)
+    records_rejected = Column(Integer, nullable=False, default=0)
+    approval_required = Column(Boolean, nullable=False, default=False)
+    confidence = Column(Float, nullable=False, default=0.0)
+    audit_json = Column(Text, nullable=True)
+    error_code = Column(String(100), nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+    executions = relationship(
+        "AgentExecution",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="AgentExecution.started_at",
+    )
+    artifacts = relationship(
+        "AgentArtifact",
+        back_populates="task",
+        cascade="all, delete-orphan",
+        order_by="AgentArtifact.created_at",
+    )
+
+
+class AgentExecution(Base):
+    __tablename__ = "agent_executions"
+
+    id = Column(String(36), primary_key=True)
+    task_id = Column(String(36), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    agent_name = Column(String(100), nullable=False, index=True)
+    status = Column(String(24), nullable=False, index=True)
+    started_at = Column(DateTime, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+    input_summary = Column(Text, nullable=True)
+    output_summary = Column(Text, nullable=True)
+    confidence = Column(Float, nullable=False, default=0.0)
+    error_message = Column(Text, nullable=True)
+
+    task = relationship("AgentTask", back_populates="executions")
+
+
+class AgentArtifact(Base):
+    __tablename__ = "agent_artifacts"
+
+    id = Column(String(36), primary_key=True)
+    task_id = Column(String(36), ForeignKey("agent_tasks.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(150), nullable=False)
+    size = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False, index=True)
+    role = Column(String(24), nullable=False, index=True)
+    storage_provider = Column(String(50), nullable=False, default="local")
+    storage_reference = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    task = relationship("AgentTask", back_populates="artifacts")
