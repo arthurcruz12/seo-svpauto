@@ -22,4 +22,5 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -r backend/requirements-dev.txt
       - run: python -m pytest -q backend/tests/test_work_traceability.py
+      - run: python -m pytest -q backend/tests/test_cloud_trash.py
       - run: python -m pytest -q backend/tests/test_password_security.py
