@@ -22,10 +22,25 @@ export type AuthSession = {
   account: LocalAccount;
 };
 
+export const AUTH_SESSION_EVENT = "seo-auth-session";
+
 import { API_BASE_URL, formatApiError, readJson } from "./api";
 
 function apiUnavailableError() {
   return new Error("O serviço SEO está desligado. Execute scripts\\start-local.cmd e volte a tentar.");
+}
+
+function mapChallenge(payload: Record<string, unknown>): SecurityChallenge {
+  return {
+    id: String(payload.challenge_id ?? ""),
+    expiresAt: Date.now() + Number(payload.expires_in_seconds ?? 300) * 1000,
+    deliveryHint: String(payload.delivery_hint ?? "Código temporário enviado pelo canal seguro configurado."),
+    developmentCode: payload.development_code ? String(payload.development_code) : undefined,
+  };
+}
+
+function publishAuthSession(session: AuthSession) {
+  window.dispatchEvent(new CustomEvent<AuthSession>(AUTH_SESSION_EVENT, { detail: session }));
 }
 
 export async function authenticateAccount(email: string, password: string): Promise<SecurityChallenge> {
@@ -37,13 +52,7 @@ export async function authenticateAccount(email: string, password: string): Prom
     });
     const payload = await readJson(response);
     if (!response.ok) throw new Error(formatApiError(payload, "Email ou palavra-passe inválidos."));
-
-    return {
-      id: payload.challenge_id,
-      expiresAt: Date.now() + payload.expires_in_seconds * 1000,
-      deliveryHint: payload.delivery_hint ?? "Código temporário enviado pelo canal seguro configurado.",
-      developmentCode: payload.development_code,
-    };
+    return mapChallenge(payload);
   } catch (error) {
     throw error instanceof TypeError ? apiUnavailableError() : error;
   }
@@ -69,12 +78,59 @@ export async function verifySecurityCode(challenge: SecurityChallenge, code: str
     });
     const payload = await readJson(response);
     if (!response.ok) throw new Error(formatApiError(payload, "Código inválido ou expirado."));
-    return { accessToken: payload.access_token, account: mapAccount(payload.account) };
+    const session = { accessToken: payload.access_token, account: mapAccount(payload.account) } as AuthSession;
+    publishAuthSession(session);
+    return session;
   } catch (error) {
-    throw error instanceof TypeError
-      ? apiUnavailableError()
-      : error;
+    throw error instanceof TypeError ? apiUnavailableError() : error;
   }
+}
+
+export async function requestAdminPasswordChange(accessToken: string, currentPassword: string): Promise<SecurityChallenge> {
+  const response = await fetch(`${API_BASE_URL}/auth/password/request`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ current_password: currentPassword }),
+  });
+  const payload = await readJson(response);
+  if (!response.ok) throw new Error(formatApiError(payload, "Não foi possível iniciar a alteração da palavra-passe."));
+  return mapChallenge(payload);
+}
+
+export async function confirmAdminPasswordChange(
+  accessToken: string,
+  input: {
+    challengeId: string;
+    code: string;
+    currentPassword: string;
+    newPassword: string;
+    confirmPassword: string;
+  },
+): Promise<{ success: boolean; message: string; reauthenticate: boolean }> {
+  const response = await fetch(`${API_BASE_URL}/auth/password/confirm`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      challenge_id: input.challengeId,
+      code: input.code,
+      current_password: input.currentPassword,
+      new_password: input.newPassword,
+      confirm_password: input.confirmPassword,
+    }),
+  });
+  const payload = await readJson(response);
+  if (!response.ok) throw new Error(formatApiError(payload, "Não foi possível alterar a palavra-passe."));
+  return {
+    success: Boolean(payload.success),
+    message: String(payload.message ?? "Palavra-passe alterada."),
+    reauthenticate: Boolean(payload.reauthenticate),
+  };
 }
 
 export async function getCurrentAccount(accessToken: string) {
