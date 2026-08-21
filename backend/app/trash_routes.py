@@ -4,8 +4,9 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from . import store as store_module
 from .security import require_permission
-from .store import FILE_STORAGE_DIR, add_audit_event, connect, init_db, migrate_column, utc_now
+from .store import add_audit_event, connect, init_db, migrate_column, utc_now
 
 
 router = APIRouter(tags=["cloud-trash"])
@@ -91,7 +92,7 @@ def get_active_uploaded_file(company_id: str, file_id: str) -> dict | None:
     if storage_path:
         candidate = Path(storage_path)
         try:
-            if candidate.is_file() and candidate.resolve().is_relative_to(FILE_STORAGE_DIR.resolve()):
+            if candidate.is_file() and candidate.resolve().is_relative_to(store_module.FILE_STORAGE_DIR.resolve()):
                 payload["content"] = candidate.read_bytes()
         except (OSError, RuntimeError):
             pass
@@ -218,7 +219,7 @@ def permanently_delete_file(
     if storage_path:
         candidate = Path(storage_path)
         try:
-            if candidate.is_file() and candidate.resolve().is_relative_to(FILE_STORAGE_DIR.resolve()):
+            if candidate.is_file() and candidate.resolve().is_relative_to(store_module.FILE_STORAGE_DIR.resolve()):
                 candidate.unlink(missing_ok=True)
         except (OSError, RuntimeError):
             pass
