@@ -34,6 +34,210 @@ text = replace_once(
     "operational persistence result type",
 )
 
+cloud_trace_helpers = r'''
+type AssistantWorkCloudTrace = {
+  id: string;
+  filename: string;
+  contentType: string;
+  category: string;
+  sizeBytes: number;
+  sha256: string;
+  uploadedAt: string;
+  referenceDate?: string | null;
+  taskId?: string | null;
+  origin?: string | null;
+  parentFileId?: string | null;
+};
+
+const assistantWorkTraceability = new Map<string, AssistantWorkCloudTrace>();
+
+function workTraceToCloudFile(item: AssistantWorkCloudTrace): CloudFile {
+  return {
+    id: item.id,
+    filename: item.filename,
+    contentType: item.contentType,
+    category: item.category,
+    sizeBytes: item.sizeBytes,
+    sha256: item.sha256,
+    uploadedAt: item.uploadedAt,
+  };
+}
+
+'''
+text = replace_once(text, "function App() {", cloud_trace_helpers + "function App() {", "cloud traceability helpers")
+
+text = replace_once(
+    text,
+    '''  async function loadAssistantCloudFiles(token: string) {''',
+    '''  async function loadAssistantWorkTraceability(token: string) {
+    if (!token) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/assistant/work/files?limit=250`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.status === 404) return;
+      if (!response.ok) return;
+      const payload = await response.json() as AssistantWorkCloudTrace[];
+      payload.forEach((item) => assistantWorkTraceability.set(item.id, item));
+      const tracedFiles = payload.map(workTraceToCloudFile);
+      const tracedIds = new Set(tracedFiles.map((file) => file.id));
+      setCloudFiles((current) => [...tracedFiles, ...current.filter((file) => !tracedIds.has(file.id))]);
+    } catch {
+      // Oracle may still be on the previous backend; the normal cloud remains usable.
+    }
+  }
+
+  async function loadAssistantCloudFiles(token: string) {''',
+    "work cloud traceability loader",
+)
+
+text = replace_once(
+    text,
+    '''        await refreshCloudState();
+        await loadAssistantCloudFiles(accessToken);''',
+    '''        await refreshCloudState();
+        await loadAssistantWorkTraceability(accessToken);
+        await loadAssistantCloudFiles(accessToken);''',
+    "cloud traceability refresh",
+)
+
+text = replace_once(
+    text,
+    '''  async function downloadCloudFile(file: CloudFile) {''',
+    '''  async function setCloudReferenceDate(fileId: string, date: string) {
+    if (!date) {
+      showToast("Selecione uma data de referência.");
+      return;
+    }
+    try {
+      const form = new FormData();
+      form.append("reference_date", date);
+      const response = await fetch(`${API_BASE_URL}/assistant/work/files/${encodeURIComponent(fileId)}/reference-date`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}` },
+        body: form,
+      });
+      const payload = await response.json().catch(() => null) as AssistantWorkCloudTrace | { detail?: string } | null;
+      if (!response.ok) {
+        const detail = payload && "detail" in payload ? payload.detail : undefined;
+        throw new Error(detail || "Não foi possível guardar a data de referência.");
+      }
+      const updated = payload as AssistantWorkCloudTrace;
+      assistantWorkTraceability.set(fileId, updated);
+      await loadAssistantWorkTraceability(accessToken);
+      showToast(`Excel associado a ${new Date(`${date}T12:00:00`).toLocaleDateString("pt-PT")}.`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Não foi possível guardar a data de referência.");
+    }
+  }
+
+  async function downloadCloudFile(file: CloudFile) {''',
+    "cloud reference date action",
+)
+
+text = replace_once(
+    text,
+    '''              onCheckout={startCheckout}
+              onDownloadFile={downloadCloudFile}
+            />''',
+    '''              onCheckout={startCheckout}
+              onDownloadFile={downloadCloudFile}
+              onSetReferenceDate={setCloudReferenceDate}
+            />''',
+    "cloud view reference-date handler",
+)
+
+text = replace_once(
+    text,
+    '''  onCheckout,
+  onDownloadFile,
+}: {''',
+    '''  onCheckout,
+  onDownloadFile,
+  onSetReferenceDate,
+}: {''',
+    "cloud view prop destructuring",
+)
+
+text = replace_once(
+    text,
+    '''  onCheckout: (plan: string) => void;
+  onDownloadFile: (file: CloudFile) => void;
+}) {''',
+    '''  onCheckout: (plan: string) => void;
+  onDownloadFile: (file: CloudFile) => void;
+  onSetReferenceDate: (fileId: string, date: string) => void;
+}) {''',
+    "cloud view prop type",
+)
+
+text = replace_once(
+    text,
+    '''  const latestFile = files[0];
+  const storageLabel = totalStorage >= 1024 * 1024 ? `${(totalStorage / (1024 * 1024)).toFixed(1)} MB` : `${(totalStorage / 1024).toFixed(1)} KB`;''',
+    '''  const latestFile = files[0];
+  const [workReferenceDates, setWorkReferenceDates] = useState<Record<string, string>>({});
+  const storageLabel = totalStorage >= 1024 * 1024 ? `${(totalStorage / (1024 * 1024)).toFixed(1)} MB` : `${(totalStorage / 1024).toFixed(1)} KB`;''',
+    "cloud date input state",
+)
+
+old_cards = '''            {files.map((file) => (
+              <button key={file.id} className="rounded-xl border border-line bg-white p-4 text-left transition hover:border-[#0071e3] hover:bg-blue-50/30" onClick={() => onDownloadFile(file)} type="button">
+                <div className="flex items-start justify-between gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-[#0071e3]"><FileSpreadsheet size={19} aria-hidden="true" /></span>
+                  <Download size={17} className="text-slate-500" aria-hidden="true" />
+                </div>
+                <p className="mt-3 truncate text-sm font-semibold text-ink">{file.filename}</p>
+                <p className="mt-1 text-xs text-slate-500">{file.category} · {(file.sizeBytes / 1024).toFixed(1)} KB</p>
+                <p className="mt-1 text-xs text-slate-500">{new Date(file.uploadedAt).toLocaleString("pt-PT")}</p>
+                <p className="mt-2 truncate font-mono text-[10px] text-slate-400">SHA-256 {file.sha256}</p>
+              </button>
+            ))}'''
+
+new_cards = '''            {files.map((file) => {
+              const trace = assistantWorkTraceability.get(file.id);
+              const isWorkOutput = trace?.origin === "assistant-work-output";
+              const selectedReferenceDate = workReferenceDates[file.id] ?? trace?.referenceDate ?? "";
+              return (
+                <div key={file.id} className={`rounded-xl border bg-white p-4 text-left transition ${isWorkOutput ? "border-emerald-200 hover:border-emerald-400" : "border-line hover:border-[#0071e3]"}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${isWorkOutput ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-[#0071e3]"}`}><FileSpreadsheet size={19} aria-hidden="true" /></span>
+                    <button type="button" onClick={() => onDownloadFile(file)} className="rounded-lg border border-black/5 p-2 text-slate-500 hover:bg-slate-50" title="Descarregar ficheiro"><Download size={17} aria-hidden="true" /></button>
+                  </div>
+                  <p className="mt-3 truncate text-sm font-semibold text-ink">{file.filename}</p>
+                  <p className="mt-1 text-xs text-slate-500">{file.category} · {(file.sizeBytes / 1024).toFixed(1)} KB</p>
+                  <p className="mt-1 text-xs text-slate-500">Carregado em {new Date(file.uploadedAt).toLocaleString("pt-PT")}</p>
+                  {trace?.taskId && <p className="mt-1 truncate text-[10px] font-medium text-slate-400">Tarefa {trace.taskId}</p>}
+                  {isWorkOutput && (
+                    <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                      <p className="text-xs font-semibold text-emerald-900">Data de referência</p>
+                      <p className="mt-1 text-[11px] leading-4 text-emerald-800/70">Organiza este Excel no calendário sem alterar as datas originais dos documentos.</p>
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          type="date"
+                          value={selectedReferenceDate}
+                          max="2099-12-31"
+                          onChange={(event) => setWorkReferenceDates((current) => ({ ...current, [file.id]: event.target.value }))}
+                          className="min-w-0 flex-1 rounded-lg border border-emerald-200 bg-white px-2 py-2 text-xs text-[#1d1d1f]"
+                        />
+                        <button
+                          type="button"
+                          disabled={!selectedReferenceDate}
+                          onClick={() => onSetReferenceDate(file.id, selectedReferenceDate)}
+                          className="rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-40"
+                        >
+                          Guardar
+                        </button>
+                      </div>
+                      {trace?.referenceDate && <p className="mt-2 text-[11px] font-semibold text-emerald-800">Associado a {new Date(`${trace.referenceDate}T12:00:00`).toLocaleDateString("pt-PT")}</p>}
+                    </div>
+                  )}
+                  <p className="mt-2 truncate font-mono text-[10px] text-slate-400">SHA-256 {file.sha256}</p>
+                </div>
+              );
+            })}'''
+text = replace_once(text, old_cards, new_cards, "cloud file reference-date controls")
+
 text = replace_once(
     text,
     '''  const [workError, setWorkError] = useState("");
@@ -123,10 +327,14 @@ required_markers = [
     "Rastreabilidade operacional",
     "PENDING_BACKEND_UPGRADE",
     "Data de referência do Excel na Nuvem",
+    "loadAssistantWorkTraceability",
+    "assistantWorkTraceability",
+    "onSetReferenceDate",
+    "Organiza este Excel no calendário",
 ]
 for marker in required_markers:
     if marker not in text:
         raise SystemExit(f"Work traceability UI marker missing after patch: {marker}")
 
 path.write_text(text, encoding="utf-8")
-print("Added Work traceability status and cloud reference-date control")
+print("Added Work traceability controls to Trabalho and Nuvem")
