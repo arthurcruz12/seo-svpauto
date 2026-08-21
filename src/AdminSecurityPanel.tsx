@@ -35,6 +35,7 @@ export default function AdminSecurityPanel() {
   }, []);
 
   if (!session || session.account.role !== "admin") return null;
+  const adminSession = session;
 
   function resetForm() {
     setStep("password");
@@ -69,7 +70,7 @@ export default function AdminSecurityPanel() {
 
     setBusy(true);
     try {
-      const nextChallenge = await requestAdminPasswordChange(session.accessToken, currentPassword);
+      const nextChallenge = await requestAdminPasswordChange(adminSession.accessToken, currentPassword);
       setChallenge(nextChallenge);
       setStep("mfa");
     } catch (requestError) {
@@ -90,7 +91,7 @@ export default function AdminSecurityPanel() {
     setBusy(true);
     setError("");
     try {
-      const result = await confirmAdminPasswordChange(session.accessToken, {
+      const result = await confirmAdminPasswordChange(adminSession.accessToken, {
         challengeId: challenge.id,
         code,
         currentPassword,
