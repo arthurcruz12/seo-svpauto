@@ -14,6 +14,12 @@ router = APIRouter(tags=["cloud-trash"])
 def ensure_trash_schema() -> None:
     init_db()
     with connect() as connection:
+        # The Trash can be opened before the Work traceability module. Keep all
+        # additive uploaded_files metadata available independently of route order.
+        migrate_column(connection, "uploaded_files", "reference_date", "TEXT")
+        migrate_column(connection, "uploaded_files", "source_task_id", "TEXT")
+        migrate_column(connection, "uploaded_files", "origin", "TEXT NOT NULL DEFAULT 'upload'")
+        migrate_column(connection, "uploaded_files", "parent_file_id", "TEXT")
         migrate_column(connection, "uploaded_files", "deleted_at", "TEXT")
         migrate_column(connection, "uploaded_files", "deleted_by", "TEXT")
         connection.execute(
