@@ -18,11 +18,9 @@ BACKEND_BASE = os.getenv("SEO_BACKEND_URL", "https://sistemaeficienciaoperaciona
 MAX_UPLOAD_BYTES = int(os.getenv("SEO_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
 MANAGER = AgentManager()
 
-# Preview-only fallback. Durable task/artifact persistence belongs to
-# app.assistant_api in the FastAPI backend. This cache is deliberately scoped
-# by bearer-token fingerprint and may disappear when a serverless instance is
-# recycled; it exists only so a Preview can exercise the real agent chain
-# before the external backend is promoted.
+# Preview-only fallback. Durable task/artifact persistence belongs to the SEO
+# backend. The in-memory cache remains as a safety net until Oracle runs the
+# Work traceability endpoints.
 _TASKS: dict[str, list[dict]] = defaultdict(list)
 
 
@@ -43,6 +41,33 @@ def _safe_filename(name: str | None) -> str:
 
 def _preview_only() -> bool:
     return os.getenv("VERCEL_ENV", "development").lower() != "production"
+
+
+def _multipart_payload(fields: dict[str, str], files: list[tuple[str, str, str, bytes]]) -> tuple[bytes, str]:
+    boundary = f"----seo-work-{uuid4().hex}"
+    chunks: list[bytes] = []
+    for name, value in fields.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode(),
+                str(value).encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    for field_name, filename, content_type, content in files:
+        safe_name = _safe_filename(filename).replace('"', "_")
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode(),
+                f'Content-Disposition: form-data; name="{field_name}"; filename="{safe_name}"\r\n'.encode("utf-8"),
+                f"Content-Type: {content_type}\r\n\r\n".encode(),
+                content,
+                b"\r\n",
+            ]
+        )
+    chunks.append(f"--{boundary}--\r\n".encode())
+    return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
 
 class handler(BaseHTTPRequestHandler):
@@ -92,7 +117,7 @@ class handler(BaseHTTPRequestHandler):
         payload = json.dumps({
             "actor": "SEO Preview Agent Manager",
             "action": "AGENT_BILLING_PREVIEW_EXECUTED",
-            "details": f"task_id={task_id}; status={status}; source_sha256={source_sha256}; output_sha256={output_sha256 or 'none'}; durable_storage=false",
+            "details": f"task_id={task_id}; status={status}; source_sha256={source_sha256}; output_sha256={output_sha256 or 'none'}",
         }).encode("utf-8")
         request = urllib.request.Request(
             f"{BACKEND_BASE}/audit/events",
@@ -109,6 +134,79 @@ class handler(BaseHTTPRequestHandler):
                 return 200 <= response.status < 300
         except Exception:
             return False
+
+    def _persist_operational_result(
+        self,
+        *,
+        token: str,
+        task_id: str,
+        source_name: str,
+        source_content: bytes,
+        output_name: str,
+        output_content: bytes,
+        audit: dict,
+    ) -> dict:
+        body, content_type = _multipart_payload(
+            {
+                "task_id": task_id,
+                "audit_json": json.dumps(audit, ensure_ascii=False, default=str),
+            },
+            [
+                (
+                    "source_file",
+                    source_name,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    source_content,
+                ),
+                (
+                    "output_file",
+                    output_name,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    output_content,
+                ),
+            ],
+        )
+        request = urllib.request.Request(
+            f"{BACKEND_BASE}/assistant/work/billing/persist",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": content_type,
+                "Content-Length": str(len(body)),
+                "User-Agent": "seo-preview-assistant/2.0",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=25) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+                return {
+                    "status": "PERSISTED",
+                    "backend_status": response.status,
+                    **payload,
+                }
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return {
+                    "status": "PENDING_BACKEND_UPGRADE",
+                    "backend_status": 404,
+                    "message": "O Oracle ainda não possui os endpoints de rastreabilidade do Modo Trabalho.",
+                }
+            try:
+                detail = exc.read().decode("utf-8")[:500]
+            except Exception:
+                detail = ""
+            return {
+                "status": "PERSISTENCE_FAILED",
+                "backend_status": exc.code,
+                "message": detail or "O backend recusou a persistência operacional.",
+            }
+        except Exception as exc:
+            return {
+                "status": "PERSISTENCE_FAILED",
+                "backend_status": None,
+                "message": str(exc)[:500],
+            }
 
     def _parse_upload(self):
         length = int(self.headers.get("Content-Length", "0") or 0)
@@ -157,7 +255,7 @@ class handler(BaseHTTPRequestHandler):
         tasks = _TASKS.get(_session_key(token), [])[:20]
         return self._json({
             "tasks": tasks,
-            "persistence": "ephemeral_preview",
+            "persistence": "backend_when_available",
             "durable_backend_required_for_production": True,
         })
 
@@ -211,6 +309,10 @@ class handler(BaseHTTPRequestHandler):
             })
 
         artifacts: list[dict] = []
+        operational_persistence = {
+            "status": "NOT_APPLICABLE",
+            "message": "Sem Excel final aprovado para persistir.",
+        }
         if result.get("output_content") and result.get("status") == "COMPLETED":
             output_content = result["output_content"]
             artifacts.append({
@@ -221,7 +323,17 @@ class handler(BaseHTTPRequestHandler):
                 "sha256": result["output_sha256"],
                 "inline_base64": base64.b64encode(output_content).decode("ascii"),
             })
+            operational_persistence = self._persist_operational_result(
+                token=token,
+                task_id=result["task_id"],
+                source_name=filename,
+                source_content=content,
+                output_name=result["output_filename"],
+                output_content=output_content,
+                audit=result["audit"],
+            )
 
+        durable_storage = operational_persistence.get("status") == "PERSISTED"
         task = {
             "task_id": result["task_id"],
             "agent": "billing",
@@ -238,7 +350,8 @@ class handler(BaseHTTPRequestHandler):
             "records_processed": result["records_processed"],
             "records_rejected": result["records_rejected"],
             "preview_bridge": True,
-            "durable_storage": False,
+            "durable_storage": durable_storage,
+            "operational_persistence": operational_persistence,
         }
         key = _session_key(token)
         _TASKS[key].insert(0, task)
@@ -252,12 +365,18 @@ class handler(BaseHTTPRequestHandler):
             result.get("output_sha256"),
         )
 
+        if result["status"] == "COMPLETED" and durable_storage:
+            answer = "Faturação concluída e auditada. Documentos, Anomalias e Nuvem foram atualizados no SEO."
+            persistence_label = "durable_backend"
+        elif result["status"] == "COMPLETED":
+            answer = "Faturação concluída e auditada. O Excel está disponível; a persistência operacional aguarda a atualização do backend do Oracle."
+            persistence_label = "ephemeral_preview"
+        else:
+            answer = "A faturação foi processada, mas o auditor rejeitou o resultado."
+            persistence_label = "not_persisted"
+
         return self._json({
-            "answer": (
-                "Faturação concluída e auditada no Preview. O Excel pode ser descarregado agora."
-                if result["status"] == "COMPLETED"
-                else "A faturação foi processada, mas o auditor rejeitou o resultado."
-            ),
+            "answer": answer,
             "task_id": result["task_id"],
             "status": result["status"],
             "agents_used": result["agents_used"],
@@ -266,6 +385,7 @@ class handler(BaseHTTPRequestHandler):
             "confidence": result["confidence"],
             "errors": result["errors"],
             "preview_bridge": True,
-            "persistence": "ephemeral_preview",
+            "persistence": persistence_label,
+            "operational_persistence": operational_persistence,
             "audit_persisted": audit_persisted,
         })
