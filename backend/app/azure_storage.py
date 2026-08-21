@@ -22,3 +22,19 @@ def upload_document(company_id: str, file_id: str, filename: str, content: bytes
         return blob_name
     except Exception:
         return None
+
+
+def delete_document(company_id: str, file_id: str, filename: str) -> bool:
+    connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING", "").strip()
+    if not connection_string:
+        return False
+    try:
+        from azure.storage.blob import BlobServiceClient
+
+        container_name = os.getenv("AZURE_STORAGE_CONTAINER", "seo-documentos")
+        service = BlobServiceClient.from_connection_string(connection_string)
+        blob_name = f"{company_id}/{file_id}/{filename}"
+        service.get_blob_client(container=container_name, blob=blob_name).delete_blob(delete_snapshots="include")
+        return True
+    except Exception:
+        return False
