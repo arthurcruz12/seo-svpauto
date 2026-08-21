@@ -19,6 +19,8 @@ def ensure_work_traceability_schema() -> None:
         migrate_column(connection, "uploaded_files", "source_task_id", "TEXT")
         migrate_column(connection, "uploaded_files", "origin", "TEXT NOT NULL DEFAULT 'upload'")
         migrate_column(connection, "uploaded_files", "parent_file_id", "TEXT")
+        migrate_column(connection, "uploaded_files", "deleted_at", "TEXT")
+        migrate_column(connection, "uploaded_files", "deleted_by", "TEXT")
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS work_document_records (
@@ -56,6 +58,9 @@ def ensure_work_traceability_schema() -> None:
         connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_uploaded_files_task ON uploaded_files (company_id, source_task_id, uploaded_at DESC)"
         )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_uploaded_files_deleted ON uploaded_files (company_id, deleted_at, uploaded_at DESC)"
+        )
 
 
 def tag_cloud_file(
@@ -73,7 +78,7 @@ def tag_cloud_file(
             """
             UPDATE uploaded_files
             SET origin = ?, source_task_id = ?, reference_date = ?, parent_file_id = ?
-            WHERE id = ? AND company_id = ?
+            WHERE id = ? AND company_id = ? AND deleted_at IS NULL
             """,
             (origin, task_id, reference_date, parent_file_id, file_id, company_id),
         )
@@ -89,7 +94,7 @@ def assign_reference_date(company_id: str, file_id: str, reference_date: date) -
             """
             UPDATE uploaded_files
             SET reference_date = ?
-            WHERE id = ? AND company_id = ? AND source_task_id IS NOT NULL
+            WHERE id = ? AND company_id = ? AND source_task_id IS NOT NULL AND deleted_at IS NULL
             """,
             (value, file_id, company_id),
         )
@@ -100,7 +105,7 @@ def assign_reference_date(company_id: str, file_id: str, reference_date: date) -
             SELECT id, filename, content_type, category, size_bytes, sha256, uploaded_at,
                    reference_date, source_task_id, origin, parent_file_id
             FROM uploaded_files
-            WHERE id = ? AND company_id = ?
+            WHERE id = ? AND company_id = ? AND deleted_at IS NULL
             """,
             (file_id, company_id),
         ).fetchone()
@@ -116,7 +121,7 @@ def list_work_cloud_files(company_id: str, limit: int = 100) -> list[dict]:
             SELECT id, filename, content_type, category, size_bytes, sha256, uploaded_at,
                    reference_date, source_task_id, origin, parent_file_id
             FROM uploaded_files
-            WHERE company_id = ? AND source_task_id IS NOT NULL
+            WHERE company_id = ? AND source_task_id IS NOT NULL AND deleted_at IS NULL
             ORDER BY COALESCE(reference_date, uploaded_at) DESC, uploaded_at DESC
             LIMIT ?
             """,
