@@ -20,5 +20,9 @@ def test_protected_frontend_exposes_reference_date_without_touching_core_source(
     assert "Data de referência do Excel na Nuvem" in patch
     assert "/assistant/work/files/" in patch
     assert "/reference-date" in patch
+    assert "loadAssistantWorkTraceability" in patch
+    assert "assistantWorkTraceability" in patch
+    assert "onSetReferenceDate" in patch
+    assert "Organiza este Excel no calendário" in patch
     for protected_marker in ("handleLogin", "handleMfa", "handleRegister", "admin@seo.local"):
         assert protected_marker not in patch
