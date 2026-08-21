@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
+from .password_security import ensure_auth_version_column, get_auth_version
 from .schemas import AccountProfile
 from .store import (
     consume_rate_limit,
@@ -69,11 +70,14 @@ ROLE_PERMISSIONS = {
         "reconciliation:write",
     ],
 }
+
+
 def enforce_rate_limit(key: str, limit: int, window_seconds: int) -> None:
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(seconds=window_seconds)
     if not consume_rate_limit(key, limit, cutoff.isoformat()):
         raise HTTPException(status_code=429, detail="Demasiadas tentativas. Aguarde antes de repetir.")
+
 
 ensure_user(
     name=os.getenv("SEO_ADMIN_NAME", "Administrador SEO"),
@@ -82,6 +86,7 @@ ensure_user(
     company_id=ensure_company(os.getenv("SEO_DEFAULT_COMPANY_NAME", "SEO Empresa Demo"))["id"],
     password_hash=pwd_context.hash(ADMIN_PASSWORD),
 )
+ensure_auth_version_column()
 
 
 def register_client(name: str, email: str, password: str, company_name: str | None = None) -> AccountProfile:
@@ -174,7 +179,11 @@ def verify_mfa_challenge(challenge_id: str, code: str) -> dict | None:
 
 def create_access_token(subject: str) -> str:
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_MINUTES)
-    return jwt.encode({"sub": subject.lower(), "exp": expires_at}, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(
+        {"sub": subject.lower(), "ver": get_auth_version(subject), "exp": expires_at},
+        JWT_SECRET,
+        algorithm=JWT_ALGORITHM,
+    )
 
 
 def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme)) -> dict:
@@ -189,6 +198,10 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
     user = get_user_by_email(str(subject).lower())
     if not user:
         raise HTTPException(status_code=401, detail="Conta não encontrada.")
+
+    token_version = int(payload.get("ver", 1))
+    if token_version != get_auth_version(user["email"]):
+        raise HTTPException(status_code=401, detail="Sessão expirada por alteração de credenciais. Inicie sessão novamente.")
     return user
 
 

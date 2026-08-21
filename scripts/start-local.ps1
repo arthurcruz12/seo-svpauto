@@ -49,7 +49,7 @@ function Start-SeoCommand {
   return $process.Id
 }
 
-$apiCommand = "set SEO_EXPOSE_DEV_MFA=1 && `"$python`" -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 > `"$apiOut`" 2> `"$apiErr`""
+$apiCommand = "set SEO_EXPOSE_DEV_MFA=1 && `"$python`" -m uvicorn backend.app.server:app --host 127.0.0.1 --port 8000 > `"$apiOut`" 2> `"$apiErr`""
 $webCommand = "npm.cmd run preview -- --host 127.0.0.1 --port 5173 > `"$webOut`" 2> `"$webErr`""
 
 $apiPid = Start-SeoCommand -Command $apiCommand
