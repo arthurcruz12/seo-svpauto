@@ -41,6 +41,9 @@ python scripts/patch-work-cloud-sync.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-work-traceability-ui.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-cloud-trash-ui.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-agent-vercel-bridge.py "$WORK_DIR/src/App.tsx"
+# Preview-only additive layer. This runs last so the protected visual structure
+# and all existing production patches remain the source of truth.
+python scripts/patch-agentic-extensions-ui.py "$WORK_DIR/src/App.tsx"
 
 pushd "$WORK_DIR" >/dev/null
 npm ci --no-audit --no-fund
