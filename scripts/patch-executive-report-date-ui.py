@@ -121,12 +121,12 @@ report_button_with_dialog = '''                <button
                       <label className="mt-2 flex min-h-24 cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed border-white/15 bg-white/[0.035] px-4 py-3 transition hover:border-amber-400/35 hover:bg-amber-500/[0.04]">
                         <div>
                           <p className="text-sm font-semibold text-white">{sellerReportFile ? sellerReportFile.name : "Selecionar Excel dos vendedores"}</p>
-                          <p className="mt-1 text-xs leading-5 text-[#a8a29e]">Aceita .xlsx, .xls ou .csv. O SEO utilizará apenas os campos disponíveis no ficheiro e não inventará valores ausentes.</p>
+                          <p className="mt-1 text-xs leading-5 text-[#a8a29e]">Aceita .xlsx ou .csv. O SEO utilizará apenas os campos disponíveis no ficheiro e não inventará valores ausentes.</p>
                         </div>
                         <Upload size={20} className="shrink-0 text-[#d4a63a]" aria-hidden="true" />
                         <input
                           type="file"
-                          accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                          accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
                           className="hidden"
                           onChange={(event) => {
                             const nextFile = event.target.files?.[0] ?? null;
