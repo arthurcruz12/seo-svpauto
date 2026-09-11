@@ -46,6 +46,7 @@ python scripts/patch-agent-vercel-bridge.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-agentic-extensions-ui.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-executive-report-date-ui.py "$WORK_DIR/src/App.tsx"
 python scripts/patch-executive-report-generator-ui.py "$WORK_DIR/src/App.tsx"
+python scripts/patch-inventory-atena-preview.py "$WORK_DIR/src/App.tsx"
 
 pushd "$WORK_DIR" >/dev/null
 npm ci --no-audit --no-fund
