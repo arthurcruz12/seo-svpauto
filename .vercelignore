@@ -1,0 +1,14 @@
+# Static-only inventory lab. Keep production backend untouched.
+api/
+app/
+tests/
+migrations/
+frontend/
+legacy/
+Dockerfile
+docker-compose.yml
+docker-compose.backend.yml
+requirements.txt
+alembic.ini
+*.md
+.env*
